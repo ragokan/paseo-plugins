@@ -19,7 +19,7 @@ type Status = { kind: "reloading" } | { kind: "failed"; error: string };
 const POLL_MS = 15_000;
 
 /**
- * One "mcp (n)" composer pill per Claude or Codex agent. It opens a popover of that provider's MCP
+ * One "mcp servers (n)" composer pill per Claude or Codex agent. It opens a popover of that provider's MCP
  * servers for the agent's folder that stays open while you toggle them; each toggle reloads the agent.
  */
 export function contributePills(client: PluginClientContext): () => void {
@@ -72,13 +72,13 @@ export function contributePills(client: PluginClientContext): () => void {
         });
         pills.set(agent.id, { registration, label });
       } catch (error) {
-        console.warn("[mcp-toggle] could not add the mcp pill", error);
+        console.warn("[mcp-toggle] could not add the mcp servers pill", error);
       }
     }
   }
 
   function labelFor(agent: TrackedAgent, servers: Mcp[]): string {
-    const label = `mcp (${servers.filter((server) => server.enabled).length})`;
+    const label = `mcp servers (${servers.filter((server) => server.enabled).length})`;
     const current = status.get(agent.id);
     if (current?.kind === "reloading") return `${label} · reloading…`;
     if (current?.kind === "failed") return `${label} · reload failed`;
