@@ -1,5 +1,5 @@
 import type { PluginButtonContentProps, PluginButtonRegistration, PluginClientContext } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
+import { Icon } from "./ui";
 import { useState, useSyncExternalStore, type ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
 import { listMcps, setMcp, type Mcp } from "../shared/rpc";

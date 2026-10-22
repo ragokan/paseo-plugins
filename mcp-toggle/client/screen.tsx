@@ -1,10 +1,11 @@
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Loading, ScrollView, SettingsCard, SettingsRow, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { SettingsCard, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { listMcps, listProjects, setMcp } from "../shared/rpc";
+import { Icon, Loading, ScrollView } from "./ui";
 
 type Theme = PluginScreenProps["theme"];
 

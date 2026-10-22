@@ -3,6 +3,6 @@
   "name": "Merge thinking into tool groups",
   "description": "Folds thinking rows between tool calls into the collapsed tool call group",
   "requirements": {
-    "paseo": ">=0.13.0-beta.1"
+    "paseo": ">=0.12.0"
   }
 }
