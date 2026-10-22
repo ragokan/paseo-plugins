@@ -14,7 +14,7 @@ import {
 import { formatBytes } from "../shared/format.ts";
 import { contextMenuTriggers, useContextMenu, type ContextMenuItem } from "./menu.tsx";
 import { Card, MetricRow, useChromeStyles, type Chrome } from "./ui.tsx";
-import { paletteFor, STATUS, type VizPalette } from "../shared/viz.ts";
+import { paletteFor, type VizPalette } from "../shared/viz.ts";
 
 export function DockerTab({ theme, layout, host }: PluginSurfaceProps) {
   const chrome: Chrome = { theme, compact: layout.compact };
@@ -179,9 +179,9 @@ export function DockerTab({ theme, layout, host }: PluginSurfaceProps) {
                   borderRadius: 4,
                   backgroundColor:
                     data.engine.state === "running"
-                      ? STATUS.good
+                      ? palette.status.good
                       : data.engine.state === "stopped"
-                        ? STATUS.warning
+                        ? palette.status.warning
                         : palette.neutral,
                 }}
               />
@@ -253,7 +253,7 @@ export function DockerTab({ theme, layout, host }: PluginSurfaceProps) {
                         width: 8,
                         height: 8,
                         borderRadius: 4,
-                        backgroundColor: container.running ? STATUS.good : palette.neutral,
+                        backgroundColor: container.running ? palette.status.good : palette.neutral,
                       }}
                     />
                     <Text style={styles.value} numberOfLines={1}>

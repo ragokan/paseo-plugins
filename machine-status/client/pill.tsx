@@ -10,7 +10,7 @@ import { readMetrics } from "../shared/contracts.ts";
 import { openMachineScreen } from "./compat.tsx";
 import { createMachineCard } from "./pill-card.tsx";
 import { pillReading, type PillReading } from "../shared/pill.ts";
-import { STATUS } from "../shared/viz.ts";
+import { paletteFor } from "../shared/viz.ts";
 
 /** Often enough to notice a runaway agent, rarely enough to cost nothing. */
 const REFRESH_MS = 10_000;
@@ -49,9 +49,10 @@ function createReadingStore(): ReadingStore {
  * keeps the colour Paseo hands it, so the pill only draws the eye when it should.
  */
 function createIcon(store: ReadingStore) {
-  return function MachineLoadIcon({ size, color }: PluginButtonIconProps) {
+  return function MachineLoadIcon({ size, color, theme }: PluginButtonIconProps) {
     const reading = useSyncExternalStore(store.subscribe, store.get);
-    const tone = reading && reading.severity !== "good" ? STATUS[reading.severity] : color;
+    const tone =
+      reading && reading.severity !== "good" ? paletteFor(theme.colors.surface0).status[reading.severity] : color;
     return <Icon name="Activity" size={size} color={tone} />;
   };
 }

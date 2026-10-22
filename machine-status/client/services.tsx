@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Linking, Pressable, ScrollView, Text, View } from "react-native";
 import { readServices, type PortRow, type ServiceRow } from "../shared/services.ts";
 import { ActionButton, Card, useChromeStyles, type Chrome } from "./ui.tsx";
-import { paletteFor, STATUS, type VizPalette } from "../shared/viz.ts";
+import { paletteFor, type VizPalette } from "../shared/viz.ts";
 
 const SOURCE_DOT: Record<ServiceRow["source"], "agent" | "plain"> = {
   agent: "agent",
@@ -58,7 +58,7 @@ export function ServicesTab({ theme, layout, host }: PluginSurfaceProps) {
             subtitle={data ? `${ports.length} of ${allPorts.length} listening` : undefined}
           >
             <View style={[styles.rowWrap, { alignItems: "center" }]}>
-              <Legend chrome={chrome} palette={palette} color={STATUS.warning} label="reachable" />
+              <Legend chrome={chrome} palette={palette} color={palette.status.warning} label="reachable" />
               <Legend chrome={chrome} palette={palette} color={palette.neutral} label="loopback only" />
               <View style={{ flex: 1 }} />
               <Pressable
@@ -119,7 +119,7 @@ export function ServicesTab({ theme, layout, host }: PluginSurfaceProps) {
                     height: 8,
                     borderRadius: 4,
                     backgroundColor:
-                      SOURCE_DOT[service.source] === "agent" ? palette.series[0] : STATUS.good,
+                      SOURCE_DOT[service.source] === "agent" ? palette.series[0] : palette.status.good,
                   }}
                 />
                 <View style={{ flex: 1, gap: 2 }}>
@@ -193,7 +193,7 @@ function PortLine({
       <View style={[styles.processRow, { flexDirection: "column", alignItems: "stretch", gap: 4 }]}>
         <View style={styles.row}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Dot color={exposed ? STATUS.warning : palette.neutral} />
+            <Dot color={exposed ? palette.status.warning : palette.neutral} />
             <Text style={styles.valueStrong}>{row.port}</Text>
             <Text style={styles.muted}>{row.protocol.toUpperCase()}</Text>
           </View>
@@ -217,7 +217,7 @@ function PortLine({
   return (
     <View style={styles.processRow}>
       <View style={{ width: 62, flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Dot color={exposed ? STATUS.warning : palette.neutral} />
+        <Dot color={exposed ? palette.status.warning : palette.neutral} />
         <Text style={styles.valueStrong}>{row.port}</Text>
       </View>
       <Text style={[styles.muted, { width: 44 }]}>{row.protocol.toUpperCase()}</Text>

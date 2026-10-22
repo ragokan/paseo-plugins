@@ -2,17 +2,17 @@
  * Chart palette and geometry. Pure values and pure functions only, so the colour
  * decisions and the bar maths are both testable without a renderer.
  *
- * Paseo exposes six theme tokens and never says which theme is active, so the
- * data palette is chosen by measuring the luminance of `surface0`. Chrome comes
- * from the theme; series colour does not — a categorical hue has to stay the
- * same hue across themes or it stops identifying anything.
+ * Paseo never says which theme is active, so the data palette is chosen by
+ * measuring the luminance of `surface0`. Chrome comes from the theme; series
+ * colour does not — a categorical hue has to stay the same hue across themes or
+ * it stops identifying anything.
  *
- * Both columns below are the reference categorical order and were validated with
- * scripts/validate_palette.js against their own surface: every hard gate passes
- * in both modes (worst adjacent CVD ΔE 8.4 dark / 9.1 light, normal-vision 19.8
- * dark / 22.9 light). The light column's aqua and yellow sit under 3:1, which the
- * relief rule permits because every series is directly labelled with its value.
+ * The dark palette is Monokai Pro Darker's (the Spectrum filter on #1e1e1e), to
+ * match the Monokai themes in this repo. Light themes keep a palette with enough
+ * contrast on white, where Monokai's yellow and green would not read.
  */
+
+export type Severity = "good" | "warning" | "serious" | "critical";
 
 export interface VizPalette {
   /** Categorical slots in fixed order. Assigned by slot, never cycled. */
@@ -26,14 +26,18 @@ export interface VizPalette {
    */
   border: string;
   borderStrong: string;
+  /** Severity colours. Always paired with a text label, never the only signal. */
+  status: Readonly<Record<Severity, string>>;
 }
 
+/** Monokai Pro Darker: cyan, purple, green and orange for data; yellow and red only for status. */
 export const DARK_PALETTE: VizPalette = {
-  series: ["#3987e5", "#d95926", "#199e70", "#c98500"],
-  neutral: "#383835",
-  grid: "#2c2c2a",
-  border: "rgba(255,255,255,0.10)",
-  borderStrong: "rgba(255,255,255,0.18)",
+  series: ["#5ad4e6", "#948ae3", "#7bd88f", "#fd9353"],
+  neutral: "#363537",
+  grid: "#2d2c2e",
+  border: "rgba(247,241,255,0.10)",
+  borderStrong: "rgba(247,241,255,0.18)",
+  status: { good: "#7bd88f", warning: "#fce566", serious: "#fd9353", critical: "#fc618d" },
 };
 
 export const LIGHT_PALETTE: VizPalette = {
@@ -42,17 +46,8 @@ export const LIGHT_PALETTE: VizPalette = {
   grid: "#e1e0d9",
   border: "rgba(11,11,11,0.10)",
   borderStrong: "rgba(11,11,11,0.18)",
+  status: { good: "#0ca30c", warning: "#fab219", serious: "#ec835a", critical: "#d03b3b" },
 };
-
-/** Fixed across themes: a status colour must never impersonate a series. */
-export const STATUS = {
-  good: "#0ca30c",
-  warning: "#fab219",
-  serious: "#ec835a",
-  critical: "#d03b3b",
-} as const;
-
-export type Severity = keyof typeof STATUS;
 
 const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const RGB = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i;

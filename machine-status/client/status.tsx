@@ -16,7 +16,6 @@ import {
   SEVERITY_LABEL,
   severityOf,
   spanLabel,
-  STATUS,
 } from "../shared/viz.ts";
 import { cpuSeverity as cpuSeverityOf, memorySeverity as memorySeverityOf } from "../shared/pill.ts";
 
@@ -121,7 +120,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               meta={`${data.cpu.cores} cores`}
               value={formatPercent(data.cpu.busyPercent)}
               valueSuffix="busy"
-              valueColor={cpuSeverity === "good" ? undefined : STATUS[cpuSeverity]}
+              valueColor={cpuSeverity === "good" ? undefined : palette.status[cpuSeverity]}
               expanded={expanded === "cpu"}
               onPress={() => toggle("cpu")}
               footer={
@@ -147,7 +146,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               meta={formatBytes(data.memory.totalBytes)}
               value={formatPercent(data.memory.usedPercent)}
               valueSuffix="in use"
-              valueColor={memorySeverity === "good" ? undefined : STATUS[memorySeverity]}
+              valueColor={memorySeverity === "good" ? undefined : palette.status[memorySeverity]}
               expanded={expanded === "memory"}
               onPress={() => toggle("memory")}
               footer={
@@ -196,7 +195,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               meta={data.disk.mountedOn}
               value={formatPercent(data.disk.usedPercent)}
               valueSuffix="used"
-              valueColor={diskSeverity === "good" ? undefined : STATUS[diskSeverity]}
+              valueColor={diskSeverity === "good" ? undefined : palette.status[diskSeverity]}
               expanded={expanded === "disk"}
               onPress={() => toggle("disk")}
               footer={<Text style={styles.muted}>{formatBytes(data.disk.freeBytes)} free</Text>}
@@ -204,7 +203,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               <View style={{ height: 34, justifyContent: "center" }}>
                 <Meter
                   percent={data.disk.usedPercent}
-                  color={diskSeverity === "good" ? palette.series[3] : STATUS[diskSeverity]}
+                  color={diskSeverity === "good" ? palette.series[3] : palette.status[diskSeverity]}
                   palette={palette}
                 />
               </View>
@@ -289,7 +288,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
             <DetailCard chrome={chrome} title="Disk · detail" onClose={() => setExpanded(null)}>
               <Meter
                 percent={data.disk.usedPercent}
-                color={diskSeverity === "good" ? palette.series[3] : STATUS[diskSeverity]}
+                color={diskSeverity === "good" ? palette.series[3] : palette.status[diskSeverity]}
                 palette={palette}
                 height={12}
               />
@@ -371,7 +370,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                 </View>
                 <Meter
                   percent={data.disk.usedPercent}
-                  color={diskSeverity === "good" ? palette.series[3] : STATUS[diskSeverity]}
+                  color={diskSeverity === "good" ? palette.series[3] : palette.status[diskSeverity]}
                   palette={palette}
                   height={10}
                 />

@@ -6,7 +6,7 @@ import { listProcesses, readMetrics } from "../shared/contracts.ts";
 import { formatBytes, formatPercent } from "../shared/format.ts";
 import { agentPorts, cpuSeverity, memorySeverity } from "../shared/pill.ts";
 import { readServices } from "../shared/services.ts";
-import { paletteFor, SEVERITY_LABEL, STATUS, takeLast, type Severity } from "../shared/viz.ts";
+import { paletteFor, SEVERITY_LABEL, takeLast, type Severity } from "../shared/viz.ts";
 import { Sparkbars } from "./charts.tsx";
 import { ActionButton, useChromeStyles, type Chrome } from "./ui.tsx";
 
@@ -172,6 +172,7 @@ function Reading({
   series: readonly number[];
 }) {
   const styles = useChromeStyles(chrome);
+  const status = paletteFor(chrome.theme.colors.surface0).status;
   return (
     <View style={{ gap: 6 }}>
       <View style={styles.row}>
@@ -182,7 +183,7 @@ function Reading({
       </View>
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 12 }}>
         <View style={{ minWidth: 64 }}>
-          <Text style={[styles.valueStrong, TABULAR, severity === "good" ? null : { color: STATUS[severity] }]}>
+          <Text style={[styles.valueStrong, TABULAR, severity === "good" ? null : { color: status[severity] }]}>
             {value}
           </Text>
           <Text style={styles.axis}>{SEVERITY_LABEL[severity]}</Text>

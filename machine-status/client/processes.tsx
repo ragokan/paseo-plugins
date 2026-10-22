@@ -7,7 +7,7 @@ import { formatBytes } from "../shared/format.ts";
 import { explainProcess, type Explanation } from "../shared/explain.ts";
 import { contextMenuTriggers, useContextMenu, type ContextMenuItem } from "./menu.tsx";
 import { Card, useChromeStyles, type Chrome } from "./ui.tsx";
-import { severityOf, STATUS, type VizPalette } from "../shared/viz.ts";
+import { severityOf, type VizPalette } from "../shared/viz.ts";
 
 
 /**
@@ -184,7 +184,7 @@ export function ProcessesSection({
               style={[
                 styles.value,
                 { width: 56, textAlign: "right", fontWeight: "600" },
-                severity === "good" ? null : { color: STATUS[severity] },
+                severity === "good" ? null : { color: palette.status[severity] },
               ]}
             >
               {/* 100% is one core, so a parallel build reads 1600%; whole numbers keep it on one line. */}
@@ -204,7 +204,7 @@ export function ProcessesSection({
                   width: `${(item.cpuPercent / peakCpu) * 100}%`,
                   height: "100%",
                   borderRadius: 3,
-                  backgroundColor: severity === "good" ? palette.series[0] : STATUS[severity],
+                  backgroundColor: severity === "good" ? palette.series[0] : palette.status[severity],
                 }}
               />
             </View>
@@ -269,9 +269,9 @@ function Verdict({
   const styles = useChromeStyles(chrome);
   const tone =
     explanation.concern === "act"
-      ? STATUS.critical
+      ? palette.status.critical
       : explanation.concern === "watch"
-        ? STATUS.warning
+        ? palette.status.warning
         : palette.series[2];
 
   return (
