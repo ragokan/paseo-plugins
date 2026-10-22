@@ -98,6 +98,18 @@ export function severityOf(percent: number | null, warnAt = 75, criticalAt = 90)
   return "good";
 }
 
+/**
+ * Memory keeps higher thresholds than CPU: Linux fills spare memory on purpose,
+ * and only the last few percent hurt.
+ */
+export function cpuSeverity(busyPercent: number | null): Severity {
+  return severityOf(busyPercent);
+}
+
+export function memorySeverity(usedPercent: number | null): Severity {
+  return severityOf(usedPercent, 80, 92);
+}
+
 export const SEVERITY_LABEL: Record<Severity, string> = {
   good: "OK",
   warning: "High",

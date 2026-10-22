@@ -1,11 +1,11 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { openMachineScreen, registerMachineScreen, supportsScreenParams } from "./client/compat.tsx";
-import { contributePills } from "./client/pill.tsx";
 import { MachineStatusSurface } from "./client/status.tsx";
 
 /**
  * The app half of the plugin: the Machine screen, the ways into it from the
- * sidebar and the Command Center, and the load pill beside each agent's composer.
+ * sidebar and the Command Center. No composer pill: it kept every connected app
+ * polling the daemon whenever an agent existed.
  */
 export default function contribute(client: PluginClientContext) {
   registerMachineScreen(client, MachineStatusSurface);
@@ -46,5 +46,6 @@ export default function contribute(client: PluginClientContext) {
     });
   }
 
-  return contributePills(client);
+  // Paseo removes the screen and command center items itself; nothing else to release.
+  return () => {};
 }

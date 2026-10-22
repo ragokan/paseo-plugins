@@ -12,12 +12,13 @@ import { formatBytes, formatDuration, formatMinutes, formatPercent } from "../sh
 import { ProcessesSection } from "./processes.tsx";
 import { ActionButton, Card, MetricRow, useChromeStyles, type Chrome } from "./ui.tsx";
 import {
+  cpuSeverity as cpuSeverityOf,
+  memorySeverity as memorySeverityOf,
   paletteFor,
   SEVERITY_LABEL,
   severityOf,
   spanLabel,
 } from "../shared/viz.ts";
-import { cpuSeverity as cpuSeverityOf, memorySeverity as memorySeverityOf } from "../shared/pill.ts";
 
 type Expanded = "cpu" | "memory" | "swap" | "disk" | null;
 
@@ -71,7 +72,6 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
     [history, data?.memory.totalBytes],
   );
 
-  // The pill and its card colour by the same thresholds; so does this tab.
   const cpuSeverity = cpuSeverityOf(data?.cpu.busyPercent ?? null);
   const memorySeverity = memorySeverityOf(data?.memory.usedPercent ?? null);
   const diskSeverity = severityOf(data?.disk.usedPercent ?? null, 85, 95);
