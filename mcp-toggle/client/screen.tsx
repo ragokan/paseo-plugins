@@ -110,7 +110,7 @@ function Servers({ theme, provider, name, about, path }: { theme: Theme; provide
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
   const hint = (server: Mcp) =>
     server.locked ??
-    (provider === "codex" ? "On or off in every project" : server.scope === "user" ? "From your user config" : "Added to this project only");
+    (provider === "codex" ? "On or off in every project" : server.scope === "user" ? "On or off for this project" : "Added to this project only");
   return (
     <Section theme={theme} title={name}>
       <Text style={muted}>{about}</Text>
