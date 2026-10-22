@@ -16,6 +16,15 @@ export const CpuSchema = z.object({
   loadPercent: z.number(),
   /** Share of all cores busy since the previous read, from /proc/stat: what `top` calls CPU use. */
   busyPercent: z.number(),
+  /** busyPercent split by who used it: user + system + steal = busy. */
+  userPercent: z.number(),
+  systemPercent: z.number(),
+  /** CPU time the hypervisor gave to other guests; only VMs report it. */
+  stealPercent: z.number(),
+  /** Idle time with disk I/O outstanding. Not part of busy. */
+  iowaitPercent: z.number(),
+  /** Busy share of each online core over the same interval, by kernel CPU number. */
+  perCore: z.array(z.object({ id: z.number(), busyPercent: z.number() })),
   /** PSI: share of the last 10 s in which some task waited for a CPU; null without PSI. */
   stallPercent: z.number().nullable(),
 });

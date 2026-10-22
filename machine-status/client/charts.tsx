@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { columnHeights, padSlots, paletteFor, stackedColumn, type VizPalette } from "../shared/viz.ts";
+import { columnHeights, padSlots, paletteFor, severityOf, stackedColumn, type VizPalette } from "../shared/viz.ts";
 import { useChromeStyles, type Chrome } from "./ui.tsx";
 
 /**
@@ -221,6 +221,70 @@ export function StackedColumnChart({
         </View>
       </View>
       {caption ? <Text style={[styles.axis, { paddingLeft: 42 }]}>{caption}</Text> : null}
+    </View>
+  );
+}
+
+/** Core numbers fit under the bars up to this many cores; beyond it only the ends are labelled. */
+const LABELLED_CORES = 32;
+
+/**
+ * One column per core, filled from the bottom like btop's core bars, coloured by
+ * the same thresholds as the CPU tile. Columns rather than rows, so 4 cores and
+ * 64 take the same height.
+ */
+export function CoreBars({
+  chrome,
+  cores,
+  palette,
+  height = 56,
+}: {
+  chrome: Chrome;
+  cores: readonly { id: number; busyPercent: number }[];
+  palette: VizPalette;
+  height?: number;
+}) {
+  const styles = useChromeStyles(chrome);
+  if (cores.length === 0) return null;
+  const labelled = cores.length <= LABELLED_CORES;
+  return (
+    <View
+      style={{ gap: 4 }}
+      accessible
+      accessibilityLabel={`Per core: ${cores.map((core) => `core ${core.id} ${Math.round(core.busyPercent)}%`).join(", ")}`}
+    >
+      <View style={{ height, flexDirection: "row", gap: cores.length > LABELLED_CORES ? 1 : 3 }}>
+        {cores.map((core) => {
+          const severity = severityOf(core.busyPercent);
+          return (
+            <View
+              key={core.id}
+              style={{ flex: 1, justifyContent: "flex-end", backgroundColor: palette.neutral, borderRadius: 2, overflow: "hidden" }}
+            >
+              <View
+                style={{
+                  height: `${Math.max(0, Math.min(100, core.busyPercent))}%`,
+                  backgroundColor: severity === "good" ? palette.series[0] : palette.status[severity],
+                }}
+              />
+            </View>
+          );
+        })}
+      </View>
+      {labelled ? (
+        <View style={{ flexDirection: "row", gap: 3 }}>
+          {cores.map((core) => (
+            <Text key={core.id} style={[styles.axis, { flex: 1, textAlign: "center" }]} numberOfLines={1}>
+              {core.id}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <View style={styles.row}>
+          <Text style={styles.axis}>{cores[0].id}</Text>
+          <Text style={styles.axis}>{cores[cores.length - 1].id}</Text>
+        </View>
+      )}
     </View>
   );
 }

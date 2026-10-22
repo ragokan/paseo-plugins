@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { buildMemory, buildPower, buildSwap, buildThermal, busyBetween, diskFrom, mountPointFor, parseCpuTimes, parseMeminfo, parsePressure } =
+const { buildMemory, buildPower, buildSwap, buildThermal, busyBetween, diskFrom, mountPointFor, parseMeminfo, parsePressure, parseStat, usageBetween } =
   await import("./metrics.ts");
 const { commandFrom, cpuBetween, formatElapsed, parseProcStat } = await import("./proc.ts");
 const { matchAgentRoots, parseSsListeners } = await import("./services.ts");
@@ -58,12 +58,44 @@ test("PSI reads the 10 s average of the some line", () => {
 });
 
 test("CPU busy counts idle and iowait as idle, and leaves guest time out", () => {
-  const before = parseCpuTimes("cpu  100 0 100 700 100 0 0 0 50 0\ncpu0 1 2 3\n");
-  const after = parseCpuTimes("cpu  200 0 200 1300 300 0 0 0 90 0\n");
-  assert.deepEqual(before, { busy: 200, total: 1000 });
+  const before = parseStat("cpu  100 0 100 700 100 0 0 0 50 0\nintr 1 2 3\n").all;
+  const after = parseStat("cpu  200 0 200 1300 300 0 0 0 90 0\n").all;
+  assert.deepEqual(before, { busy: 200, total: 1000, user: 100, system: 100, steal: 0, iowait: 100 });
   assert.equal(busyBetween(before, after), 20);
   assert.equal(busyBetween(after, after), 0);
-  assert.equal(parseCpuTimes("intr 1 2 3"), null);
+  assert.equal(parseStat("intr 1 2 3"), null);
+});
+
+test("per-core use and the user / system / steal / iowait split come from the same interval", () => {
+  const before = parseStat(
+    ["cpu  100 0 100 600 100 0 0 100 0 0", "cpu0 50 0 50 300 50 0 0 50 0 0", "cpu2 50 0 50 300 50 0 0 50 0 0", "intr 1"].join("\n"),
+  );
+  const after = parseStat(
+    [
+      "cpu  250 10 150 1100 200 10 10 270 0 0",
+      "cpu0 150 10 70 380 60 10 10 60 0 0",
+      "cpu2 70 0 60 650 140 0 0 80 0 0",
+      "cpu3 30 0 20 70 0 0 0 0 0 0",
+    ].join("\n"),
+  );
+  assert.deepEqual([...after.cores.keys()], [0, 2, 3]);
+  const usage = usageBetween(before, after);
+  // Δtotal 1000: user 160, system 70, steal 170, iowait 100, idle 500.
+  const round = (value) => Math.round(value * 10) / 10;
+  assert.equal(round(usage.userPercent), 16);
+  assert.equal(round(usage.systemPercent), 7);
+  assert.equal(round(usage.stealPercent), 17);
+  assert.equal(round(usage.iowaitPercent), 10);
+  assert.equal(round(usage.busyPercent), 40);
+  // cpu0: Δtotal 250, Δbusy 160 → 64%; cpu2: Δtotal 500, Δbusy 60 → 12%; cpu3 is new.
+  assert.deepEqual(
+    usage.perCore.map((core) => [core.id, round(core.busyPercent)]),
+    [
+      [0, 64],
+      [2, 12],
+      [3, 0],
+    ],
+  );
 });
 
 test("the disk is the mount holding home, with df's rounding", () => {

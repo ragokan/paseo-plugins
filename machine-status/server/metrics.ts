@@ -65,26 +65,86 @@ export function parsePressure(raw: string): number | null {
 export interface CpuTimes {
   busy: number;
   total: number;
+  user: number;
+  system: number;
+  steal: number;
+  iowait: number;
 }
 
 /**
- * The first `/proc/stat` line sums every core. Idle and iowait count as idle;
- * guest time is already inside user and nice, so the last two columns are left out.
+ * One `/proc/stat` cpu line: user nice system idle iowait irq softirq steal. Idle
+ * and iowait count as idle; guest time is already inside user and nice, so the
+ * last two columns are left out.
  */
-export function parseCpuTimes(raw: string): CpuTimes | null {
-  const line = raw.split("\n", 1)[0] ?? "";
-  if (!line.startsWith("cpu ")) return null;
+function timesFrom(line: string): CpuTimes | null {
   const fields = line.trim().split(/\s+/).slice(1, 9).map(Number);
   if (fields.length < 4 || fields.some((value) => !Number.isFinite(value))) return null;
+  const [user, nice, system, idle, iowait = 0, irq = 0, softirq = 0, steal = 0] = fields;
   const total = fields.reduce((sum, value) => sum + value, 0);
-  const idle = fields[3] + (fields[4] ?? 0);
-  return { busy: total - idle, total };
+  return {
+    busy: total - idle - iowait,
+    total,
+    user: user + nice,
+    system: system + irq + softirq,
+    steal,
+    iowait,
+  };
+}
+
+export interface StatTimes {
+  all: CpuTimes;
+  /** By kernel CPU number; offline cores are absent, so numbers can have gaps. */
+  cores: Map<number, CpuTimes>;
+}
+
+/** The `cpu` line sums every core; each `cpuN` line is one core. */
+export function parseStat(raw: string): StatTimes | null {
+  let all: CpuTimes | null = null;
+  const cores = new Map<number, CpuTimes>();
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("cpu")) {
+      if (all) break;
+      continue;
+    }
+    const match = /^cpu(\d*)\s/.exec(line);
+    const times = match ? timesFrom(line) : null;
+    if (!match || !times) continue;
+    if (match[1] === "") all = times;
+    else cores.set(Number(match[1]), times);
+  }
+  return all ? { all, cores } : null;
 }
 
 export function busyBetween(previous: CpuTimes, current: CpuTimes): number {
+  return shareBetween(previous, current, "busy");
+}
+
+function shareBetween(previous: CpuTimes, current: CpuTimes, key: Exclude<keyof CpuTimes, "total">): number {
   const total = current.total - previous.total;
   if (total <= 0) return 0;
-  return Math.min(100, Math.max(0, ((current.busy - previous.busy) / total) * 100));
+  return Math.min(100, Math.max(0, ((current[key] - previous[key]) / total) * 100));
+}
+
+export type CpuUsage = Pick<
+  Metrics["cpu"],
+  "busyPercent" | "userPercent" | "systemPercent" | "stealPercent" | "iowaitPercent" | "perCore"
+>;
+
+export function usageBetween(previous: StatTimes, current: StatTimes): CpuUsage {
+  return {
+    busyPercent: shareBetween(previous.all, current.all, "busy"),
+    userPercent: shareBetween(previous.all, current.all, "user"),
+    systemPercent: shareBetween(previous.all, current.all, "system"),
+    stealPercent: shareBetween(previous.all, current.all, "steal"),
+    iowaitPercent: shareBetween(previous.all, current.all, "iowait"),
+    perCore: [...current.cores]
+      .sort(([left], [right]) => left - right)
+      .map(([id, times]) => {
+        const before = previous.cores.get(id);
+        // A core that came online since the last read has no baseline yet.
+        return { id, busyPercent: before ? busyBetween(before, times) : 0 };
+      }),
+  };
 }
 
 /** Picks the mount point that holds `target` from `/proc/self/mounts`. */
@@ -280,28 +340,38 @@ const MIN_CPU_WINDOW_MS = 1_000;
 const MAX_CPU_WINDOW_MS = 30_000;
 const FIRST_CPU_WINDOW_MS = 100;
 
-let lastCpu: { at: number; times: CpuTimes; busyPercent: number } | null = null;
+const IDLE_USAGE: CpuUsage = {
+  busyPercent: 0,
+  userPercent: 0,
+  systemPercent: 0,
+  stealPercent: 0,
+  iowaitPercent: 0,
+  perCore: [],
+};
+
+let lastCpu: { at: number; times: StatTimes; usage: CpuUsage } | null = null;
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * CPU busy since the previous read. Reads closer than a second share the last
- * figure, so two pollers cannot measure over a few milliseconds; a first or stale
- * read takes one short sample instead of reporting the boot-time average.
+ * CPU use since the previous read, for the machine and for each core. Reads closer
+ * than a second share the last figures, so two pollers cannot measure over a few
+ * milliseconds; a first or stale read takes one short sample instead of reporting
+ * the boot-time average.
  */
-async function readBusyPercent(): Promise<number> {
+async function readCpuUsage(): Promise<CpuUsage> {
   const now = Date.now();
-  if (lastCpu && now - lastCpu.at < MIN_CPU_WINDOW_MS) return lastCpu.busyPercent;
+  if (lastCpu && now - lastCpu.at < MIN_CPU_WINDOW_MS) return lastCpu.usage;
   let previous = lastCpu?.times ?? null;
   if (!lastCpu || now - lastCpu.at > MAX_CPU_WINDOW_MS) {
-    previous = parseCpuTimes(read("/proc/stat") ?? "");
+    previous = parseStat(read("/proc/stat") ?? "");
     await wait(FIRST_CPU_WINDOW_MS);
   }
-  const current = parseCpuTimes(read("/proc/stat") ?? "");
-  if (!current || !previous) return 0;
-  const busyPercent = busyBetween(previous, current);
-  lastCpu = { at: Date.now(), times: current, busyPercent };
-  return busyPercent;
+  const current = parseStat(read("/proc/stat") ?? "");
+  if (!current || !previous) return IDLE_USAGE;
+  const usage = usageBetween(previous, current);
+  lastCpu = { at: Date.now(), times: current, usage };
+  return usage;
 }
 
 export async function readMetricsHandler(): Promise<Metrics> {
@@ -315,7 +385,7 @@ export async function collectMetrics(): Promise<Omit<Metrics, "history">> {
     throw new Error(`machine-status reads Linux's /proc; this daemon runs on ${process.platform}.`);
   }
 
-  const busyPercent = await readBusyPercent();
+  const usage = await readCpuUsage();
   const meminfo = parseMeminfo(read("/proc/meminfo") ?? "");
   const cpuPressure = read("/proc/pressure/cpu");
   const memoryPressure = read("/proc/pressure/memory");
@@ -334,7 +404,7 @@ export async function collectMetrics(): Promise<Omit<Metrics, "history">> {
       loadAvg5,
       loadAvg15,
       loadPercent: (loadAvg1 / cores) * 100,
-      busyPercent,
+      ...usage,
       stallPercent: cpuPressure === null ? null : parsePressure(cpuPressure),
     },
     memory: buildMemory(meminfo, memoryPressure === null ? null : parsePressure(memoryPressure)),

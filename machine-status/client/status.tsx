@@ -2,7 +2,7 @@ import { useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { ColumnChart, Legend, Meter, Sparkbars, StackedColumnChart, StatTile } from "./charts.tsx";
+import { ColumnChart, CoreBars, Legend, Meter, Sparkbars, StackedColumnChart, StatTile } from "./charts.tsx";
 import { ServicesTab } from "./services.tsx";
 import { DockerTab } from "./docker.tsx";
 import type { MachineScreenProps } from "./compat.tsx";
@@ -217,14 +217,19 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                 label="Busy"
                 value={`${formatPercent(data.cpu.busyPercent)} · ${SEVERITY_LABEL[cpuSeverity]}`}
               />
+              <MetricRow chrome={chrome} label="User" value={formatPercent(data.cpu.userPercent)} />
+              <MetricRow chrome={chrome} label="System" value={formatPercent(data.cpu.systemPercent)} />
+              <MetricRow chrome={chrome} label="Steal" value={formatPercent(data.cpu.stealPercent)} />
+              <MetricRow chrome={chrome} label="I/O wait" value={formatPercent(data.cpu.iowaitPercent)} />
               <MetricRow chrome={chrome} label="Load 1 min" value={data.cpu.loadAvg1.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load 5 min" value={data.cpu.loadAvg5.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load 15 min" value={data.cpu.loadAvg15.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load per core" value={formatPercent(data.cpu.loadPercent)} />
               <MetricRow chrome={chrome} label="Waiting for CPU, 10 s" value={formatPercent(data.cpu.stallPercent)} />
               <Text style={styles.muted}>
-                Linux load also counts tasks waiting on disk, so it can sit above 100% per core while
-                the CPU is idle. Busy is the share of CPU time actually used.
+                Busy is user plus system plus steal. Steal is time the cloud host gave to other
+                guests; I/O wait is idle time spent waiting on disk. Linux load also counts tasks
+                waiting on disk, so it can sit above 100% per core while the CPU is idle.
               </Text>
             </DetailCard>
           ) : null}
@@ -320,6 +325,22 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                   bottomLabel="0%"
                   caption={span}
                 />
+                {data.cpu.perCore.length > 0 ? (
+                  <>
+                    <View style={styles.row}>
+                      <Text style={styles.muted}>Per core</Text>
+                      <Text style={styles.muted}>
+                        busiest {formatPercent(Math.max(...data.cpu.perCore.map((core) => core.busyPercent)))}
+                      </Text>
+                    </View>
+                    <CoreBars
+                      chrome={chrome}
+                      cores={data.cpu.perCore}
+                      palette={palette}
+                      height={layout.compact ? 44 : 56}
+                    />
+                  </>
+                ) : null}
               </Card>
             </View>
             <View style={{ flex: 1 }}>

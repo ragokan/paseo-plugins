@@ -29,6 +29,10 @@ test("metrics match /proc/meminfo and grow a history", { skip }, async () => {
   assert.ok(first.cpu.busyPercent >= 0 && first.cpu.busyPercent <= 100);
   assert.ok(first.disk.totalBytes > 0 && first.disk.mountedOn.startsWith("/"));
   assert.equal(second.history.length, 2);
+  const online = readFileSync("/proc/stat", "utf8").split("\n").filter((line) => /^cpu\d+ /.test(line)).length;
+  assert.equal(second.cpu.perCore.length, online);
+  const split = second.cpu.userPercent + second.cpu.systemPercent + second.cpu.stealPercent;
+  assert.ok(Math.abs(split - second.cpu.busyPercent) < 0.01, `${split} vs ${second.cpu.busyPercent}`);
 });
 
 test("a process that starts spinning tops the CPU list, and can be stopped", { skip }, async () => {
