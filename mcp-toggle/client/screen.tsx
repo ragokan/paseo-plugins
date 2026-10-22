@@ -13,7 +13,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 const PROVIDERS: { provider: Provider; name: string; about: string }[] = [
   { provider: "claude", name: "Claude", about: "Saved for this project." },
-  { provider: "codex", name: "Codex", about: "Codex keeps one list in ~/.codex/config.toml, so a switch here applies to every project." },
+  { provider: "codex", name: "Codex", about: "Applies to every project." },
 ];
 
 // Layout and type scale follow ZeroSub's accounts page, so the two read as one app.
