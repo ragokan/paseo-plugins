@@ -1,0 +1,9 @@
+{
+  "id": "machine-status",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.12.0"
+  },
+  "name": "Machine status",
+  "description": "CPU, memory, disk, ports, processes and Docker for the Linux machine the daemon runs on."
+}
