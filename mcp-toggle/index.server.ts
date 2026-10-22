@@ -1,11 +1,12 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { listMcpsFor, reloadAgent, setMcpEnabled } from "./server/claude-config";
+import { listCodexMcpsFor, setCodexMcpEnabled } from "./server/codex-config";
 import { listMcps, listProjects, setMcp } from "./shared/rpc";
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export default function contribute(server: PluginServerContext) {
-  server.handle(listMcps, ({ cwds }) => listMcpsFor(cwds));
+  server.handle(listMcps, ({ provider, cwds }) => (provider === "codex" ? listCodexMcpsFor(cwds) : listMcpsFor(cwds)));
 
   server.handle(listProjects, async (_input, { paseo }) => {
     const { projects } = await paseo.projects.list();
@@ -15,8 +16,9 @@ export default function contribute(server: PluginServerContext) {
     }));
   });
 
-  server.handle(setMcp, async ({ cwd, name, enabled, agentId }, { paseo }) => {
-    await setMcpEnabled(cwd, name, enabled);
+  server.handle(setMcp, async ({ provider, cwd, name, enabled, agentId }, { paseo }) => {
+    if (provider === "codex") await setCodexMcpEnabled(cwd, name, enabled);
+    else await setMcpEnabled(cwd, name, enabled);
     if (!agentId) return { reloadError: null };
     const agent = paseo.agents.ref(agentId);
     await agent.refresh();

@@ -2,25 +2,30 @@ import type { PluginButtonContentProps, PluginButtonRegistration, PluginClientCo
 import { Icon } from "./ui";
 import { useState, useSyncExternalStore, type ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
-import { listMcps, setMcp, type Mcp } from "../shared/rpc";
+import { listMcps, PROVIDERS, setMcp, type Mcp, type Provider } from "../shared/rpc";
 
 interface TrackedAgent {
   id: string;
   workspaceId: string;
   cwd: string;
+  provider: Provider;
 }
+
+const PROVIDER_NAMES: Record<Provider, string> = { claude: "Claude", codex: "Codex" };
+const isProvider = (provider: string): provider is Provider => (PROVIDERS as readonly string[]).includes(provider);
 
 type Status = { kind: "reloading" } | { kind: "failed"; error: string };
 
 const POLL_MS = 15_000;
 
 /**
- * One "mcp (n)" composer pill per Claude agent. It opens a popover of the project's MCP servers that
- * stays open while you toggle them; each toggle reloads the agent.
+ * One "mcp (n)" composer pill per Claude or Codex agent. It opens a popover of that provider's MCP
+ * servers for the agent's folder that stays open while you toggle them; each toggle reloads the agent.
  */
 export function contributePills(client: PluginClientContext): () => void {
   const agents = new Map<string, TrackedAgent>();
-  const mcpsByCwd = new Map<string, Mcp[]>();
+  const mcpsByCwd: Record<Provider, Map<string, Mcp[]>> = { claude: new Map(), codex: new Map() };
+  const serversOf = (agent: TrackedAgent | undefined) => (agent ? mcpsByCwd[agent.provider].get(agent.cwd) : undefined);
   const status = new Map<string, Status>();
   const pills = new Map<string, { registration: PluginButtonRegistration; label: string }>();
   const listeners = new Set<() => void>();
@@ -35,13 +40,13 @@ export function contributePills(client: PluginClientContext): () => void {
     for (const listener of listeners) listener();
     for (const [agentId, pill] of pills) {
       const agent = agents.get(agentId);
-      if (!agent || !mcpsByCwd.get(agent.cwd)?.length) {
+      if (!serversOf(agent)?.length) {
         pill.registration.remove();
         pills.delete(agentId);
       }
     }
     for (const agent of agents.values()) {
-      const servers = mcpsByCwd.get(agent.cwd);
+      const servers = serversOf(agent);
       if (!servers?.length) continue;
       const label = labelFor(agent, servers);
       const existing = pills.get(agent.id);
@@ -58,7 +63,12 @@ export function contributePills(client: PluginClientContext): () => void {
           id: "mcps",
           workspaceId: agent.workspaceId,
           agentId: agent.id,
-          button: { title: "MCP servers", icon: "Plug", label, behavior: { kind: "popover", Content: popoverFor(agent.id) } },
+          button: {
+            title: `${PROVIDER_NAMES[agent.provider]} MCP servers`,
+            icon: "Plug",
+            label,
+            behavior: { kind: "popover", Content: popoverFor(agent.id) },
+          },
         });
         pills.set(agent.id, { registration, label });
       } catch (error) {
@@ -86,7 +96,7 @@ export function contributePills(client: PluginClientContext): () => void {
         () => version,
       );
       const agent = agents.get(agentId);
-      const servers = (agent && mcpsByCwd.get(agent.cwd)) ?? [];
+      const servers = serversOf(agent) ?? [];
       const current = status.get(agentId);
       const busy = current?.kind === "reloading";
       const separator = <View style={{ height: 1, marginVertical: 4, backgroundColor: theme.colors.border }} />;
@@ -99,9 +109,9 @@ export function contributePills(client: PluginClientContext): () => void {
               theme={theme}
               compact={layout.compact}
               icon={server.enabled ? "CircleCheck" : "Circle"}
-              label={`${server.name} — ${server.enabled ? "enabled" : "disabled"}`}
+              label={`${server.name} — ${server.enabled ? "enabled" : "disabled"}${server.locked ? " (locked)" : ""}`}
               checked={server.enabled}
-              disabled={busy || !agent}
+              disabled={busy || !agent || server.locked !== undefined}
               onPress={() => agent && void toggle(agent, server)}
             />
           ))}
@@ -139,14 +149,20 @@ export function contributePills(client: PluginClientContext): () => void {
   async function toggle(agent: TrackedAgent, server: Mcp): Promise<void> {
     const enabled = !server.enabled;
     // Show the new state at once; the reload takes a few seconds.
-    mcpsByCwd.set(
+    mcpsByCwd[agent.provider].set(
       agent.cwd,
-      (mcpsByCwd.get(agent.cwd) ?? []).map((entry) => (entry.name === server.name ? { ...entry, enabled } : entry)),
+      (serversOf(agent) ?? []).map((entry) => (entry.name === server.name ? { ...entry, enabled } : entry)),
     );
     status.set(agent.id, { kind: "reloading" });
     changed();
     try {
-      const { reloadError } = await client.rpc(setMcp, { cwd: agent.cwd, name: server.name, enabled, agentId: agent.id });
+      const { reloadError } = await client.rpc(setMcp, {
+        provider: agent.provider,
+        cwd: agent.cwd,
+        name: server.name,
+        enabled,
+        agentId: agent.id,
+      });
       if (reloadError) status.set(agent.id, { kind: "failed", error: reloadError });
       else status.delete(agent.id);
     } catch (error) {
@@ -157,23 +173,26 @@ export function contributePills(client: PluginClientContext): () => void {
   }
 
   async function refresh(): Promise<void> {
-    const cwds = [...new Set([...agents.values()].map((agent) => agent.cwd))];
-    if (stopped || cwds.length === 0) return changed();
-    try {
-      const result = await client.rpc(listMcps, { cwds });
-      mcpsByCwd.clear();
-      for (const [cwd, servers] of Object.entries(result)) mcpsByCwd.set(cwd, servers);
-    } catch (error) {
-      if (!stopped) console.warn("[mcp-toggle] could not read MCP servers", error);
-    }
+    // Each provider reads separately, so one that fails (Codex not installed) leaves the other's pills.
+    await Promise.all(
+      PROVIDERS.map(async (provider) => {
+        const cwds = [...new Set([...agents.values()].filter((agent) => agent.provider === provider).map((agent) => agent.cwd))];
+        if (stopped || cwds.length === 0) return;
+        try {
+          mcpsByCwd[provider] = new Map(Object.entries(await client.rpc(listMcps, { provider, cwds })));
+        } catch (error) {
+          if (!stopped) console.warn(`[mcp-toggle] could not read ${PROVIDER_NAMES[provider]}'s MCP servers`, error);
+        }
+      }),
+    );
     changed();
   }
 
   /** Returns true when the agent's folder has not been looked up yet. */
   function track(agent: { id: string; workspaceId?: string | null; provider: string; cwd: string }): boolean {
-    if (!agent.workspaceId || agent.provider !== "claude") return false;
-    agents.set(agent.id, { id: agent.id, workspaceId: agent.workspaceId, cwd: agent.cwd });
-    return !mcpsByCwd.has(agent.cwd);
+    if (!agent.workspaceId || !isProvider(agent.provider)) return false;
+    agents.set(agent.id, { id: agent.id, workspaceId: agent.workspaceId, cwd: agent.cwd, provider: agent.provider });
+    return !mcpsByCwd[agent.provider].has(agent.cwd);
   }
 
   // shortcut: only the 200 most recently updated agents get a pill; page through older ones like ZeroSub if that bites.
