@@ -1,6 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { listMcpsFor, reloadAgent, setMcpEnabled } from "./server/claude-config";
-import { listCodexMcpsFor, setCodexMcpEnabled } from "./server/codex-config";
+import { listCodexMcpsFor, setCodexMcpEnabled, syncCheckout } from "./server/codex-config";
 import { listMcps, listProjects, setMcp } from "./shared/rpc";
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -38,5 +38,13 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  return () => {};
+  // Codex reads only a worktree's own .codex/config.toml, so a worktree made after a switch gets the project's switches here.
+  const stopSync = server.before("agent.session_open", async ({ request }) => {
+    if (request.provider !== "codex") return;
+    await syncCheckout(request.cwd).catch((error: unknown) =>
+      console.warn(`[mcp-toggle] could not copy Codex's switches into ${request.cwd}:`, describe(error)),
+    );
+  });
+
+  return () => stopSync();
 }

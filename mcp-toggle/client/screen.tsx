@@ -13,7 +13,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 const PROVIDERS: { provider: Provider; name: string; about: string }[] = [
   { provider: "claude", name: "Claude", about: "Saved for this project." },
-  { provider: "codex", name: "Codex", about: "Applies to every project." },
+  { provider: "codex", name: "Codex", about: "Saved in this project's .codex/config.toml." },
 ];
 
 // Layout and type scale follow ZeroSub's accounts page, so the two read as one app.
@@ -110,7 +110,7 @@ function Servers({ theme, provider, name, about, path }: { theme: Theme; provide
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
   const hint = (server: Mcp) =>
     server.locked ??
-    (provider === "codex" ? "On or off in every project" : server.scope === "user" ? "On or off for this project" : "Added to this project only");
+    (server.scope === "user" ? "On or off for this project" : "Added to this project only");
   return (
     <Section theme={theme} title={name}>
       <Text style={muted}>{about}</Text>
