@@ -8,7 +8,7 @@ function McpSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
 }
 
 export default function contribute(client: PluginClientContext) {
-  client.addScreen({ id: "mcps", title: "Manage mcp", Component: McpScreen });
-  client.addSidebarHeaderItem({ id: "mcps", title: "Manage mcp", Component: McpSidebarItem });
+  client.addScreen({ id: "mcps", title: "Manage MCP servers", Component: McpScreen });
+  client.addSidebarHeaderItem({ id: "mcps", title: "Manage MCP servers", Component: McpSidebarItem });
   return contributePills(client);
 }

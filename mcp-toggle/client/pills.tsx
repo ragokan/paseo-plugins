@@ -135,7 +135,7 @@ export function contributePills(client: PluginClientContext): () => void {
             theme={theme}
             compact={layout.compact}
             icon="SlidersHorizontal"
-            label="Manage mcp…"
+            label="Manage MCP servers…"
             onPress={() => {
               close();
               client.openScreen({ screenId: "mcps" });
@@ -220,7 +220,7 @@ export function contributePills(client: PluginClientContext): () => void {
       if (!stopped) console.error("[mcp-toggle] could not watch agents", error);
     });
 
-  // Picks up changes made elsewhere: the Manage mcp screen, Claude's own /mcp, another device.
+  // Picks up changes made elsewhere: the Manage MCP servers screen, Claude's own /mcp, another device.
   const poll = setInterval(() => void refresh(), POLL_MS);
 
   return () => {
