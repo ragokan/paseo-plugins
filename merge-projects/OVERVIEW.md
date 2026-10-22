@@ -1,0 +1,3 @@
+Shows same-named projects from different hosts as one sidebar project, so a folder like your home directory on three machines is one project with each host's threads under it, each thread still showing its host badge. Paseo already does this for git repos with the same remote; this extends it to plain folders and to same-named repos. Two same-named projects on one host stay separate. Merged projects start without their saved sidebar position.
+
+The plugin SDK has no project grouping API yet, so the plugin wraps the desktop app's own grouping function. It works on the desktop and web app only, may stop working after a Paseo update, and on iOS and Android it changes nothing.

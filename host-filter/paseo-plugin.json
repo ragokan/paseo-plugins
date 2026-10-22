@@ -1,0 +1,8 @@
+{
+  "id": "host-filter",
+  "name": "Host filter",
+  "description": "Pick which host the sidebar shows, from the top of the sidebar",
+  "requirements": {
+    "paseo": ">=0.11.2"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "paseo-monokai-themes",
+  "description": "Monokai Pro filters as Paseo app themes.",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.9.0-beta.2",
+    "@types/node": "^22.7.0",
+    "typescript": "^5.9.3"
+  }
+}

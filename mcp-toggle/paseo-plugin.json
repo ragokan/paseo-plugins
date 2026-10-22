@@ -1,0 +1,9 @@
+{
+  "id": "mcp-toggle",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.13.0-beta.1"
+  },
+  "name": "MCP toggle",
+  "description": "Turn Claude's MCP servers on or off per project, from the sidebar before a session or from a chat's composer."
+}
