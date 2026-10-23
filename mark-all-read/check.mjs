@@ -81,20 +81,22 @@ const { outputText } = ts.transpileModule(readFileSync(new URL("index.client.ts"
 });
 const listCalls = [];
 const pages = new Map();
+const workspaceCalls = [];
+const workspacePages = new Map();
+const lister = (calls, pagesByHost, serverId) => async (options) => {
+  calls.push({ serverId, ...options });
+  const result = pagesByHost.get(serverId)?.[options.page.cursor ?? "first"];
+  if (result instanceof Error) throw result;
+  return result;
+};
 const plugin = { exports: {} };
 new Function("require", "module", "exports", outputText)(
   (id) => {
     assert.equal(id, "@getpaseo/plugin/client");
     return {
       getPaseoClient: (serverId) => ({
-        agents: {
-          async list(options) {
-            listCalls.push({ serverId, ...options });
-            const result = pages.get(serverId)?.[options.page.cursor ?? "first"];
-            if (result instanceof Error) throw result;
-            return result;
-          },
-        },
+        agents: { list: lister(listCalls, pages, serverId) },
+        workspaces: { list: lister(workspaceCalls, workspacePages, serverId) },
       }),
     };
   },
@@ -115,12 +117,17 @@ pages.set("srv_a", {
     pageInfo: { hasMore: true, nextCursor: "next" },
   },
   next: {
-    entries: [agent("ws1"), agent("ws5", { archivedAt: "2026-10-01T00:00:00Z" }), agent(undefined)],
+    // ws-archived: an agent that outlived its archived workspace, which the daemon refuses to clear.
+    entries: [agent("ws1"), agent("ws5", { archivedAt: "2026-10-01T00:00:00Z" }), agent(undefined), agent("ws-archived")],
     pageInfo: { hasMore: false, nextCursor: null },
   },
 });
 pages.set("srv_b", { first: { entries: [], pageInfo: { hasMore: false, nextCursor: null } } });
 pages.set("srv_d", { first: new Error("list failed") });
+workspacePages.set("srv_a", {
+  first: { entries: [{ id: "ws1" }, { id: "ws3" }], pageInfo: { hasMore: true, nextCursor: "more" } },
+  more: { entries: [{ id: "ws2" }, { id: "ws4" }, { id: "ws5" }], pageInfo: { hasMore: false, nextCursor: null } },
+});
 
 const cleared = [];
 const client = (serverId) => ({ clearWorkspaceAttention: async (ids) => void cleared.push({ serverId, ids }) });
@@ -142,8 +149,9 @@ const store = {
 await assert.rejects(markAllRead(store), {
   message: "Mark All as Read failed on srv_c (offline), ragair (list failed)",
 });
-// Unread and failed agents' workspaces, once each; agents waiting on a permission, archived or
-// without a workspace are left alone; a host with nothing unread gets no request.
+// Unread and failed agents' workspaces, once each; agents waiting on a permission, archived,
+// without a workspace or in a workspace that is no longer active are left alone; a host with
+// nothing unread gets no request.
 assert.deepEqual(cleared, [{ serverId: "srv_a", ids: ["ws1", "ws2"] }]);
 const query = { includeBackground: true, filter: { requiresAttention: true } };
 assert.deepEqual(
@@ -155,6 +163,14 @@ assert.deepEqual(
     ["srv_a", { limit: 200, cursor: "next" }],
   ],
 );
+// Active workspaces, background ones included, only where something is unread.
+assert.deepEqual(
+  workspaceCalls.map(({ serverId, page, ...rest }) => (assert.deepEqual(rest, { filter: { includeBackground: true } }), [serverId, page])),
+  [
+    ["srv_a", { limit: 200, cursor: undefined }],
+    ["srv_a", { limit: 200, cursor: "more" }],
+  ],
+);
 
 // A clear that fails on one host is reported too.
 cleared.length = 0;
@@ -162,6 +178,7 @@ hosts[2].status = "online";
 pages.set("srv_c", pages.get("srv_b"));
 pages.delete("srv_d");
 pages.set("srv_d", pages.get("srv_a"));
+workspacePages.set("srv_d", workspacePages.get("srv_a"));
 store.getSnapshot = (serverId) => ({
   connectionStatus: "online",
   client: serverId === "srv_d" ? { clearWorkspaceAttention: () => Promise.reject(new Error("daemon said no")) } : client(serverId),
