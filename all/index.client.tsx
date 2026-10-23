@@ -3,26 +3,22 @@ import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/c
 import { joinAppFeatures, whileAppFeature } from "./client/app-features";
 import { FeatureSettings } from "./client/settings";
 import { createSwitches, type Contribution } from "./client/switches";
-import hostFilter from "./client/plugins/host-filter/index";
+import { joinWorkspaceSettings } from "./client/plugins/hide-workspaces/hosts";
+import { addMarkAsDone, contributeSidebar as hideWorkspaces } from "./client/plugins/hide-workspaces/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
 import mcpToggle from "./client/plugins/mcp-toggle/index";
-import mergeProjects from "./client/plugins/merge-projects/index";
 import mergeThinking from "./client/plugins/merge-thinking/index";
 import themes from "./client/plugins/themes/index";
-import { joinWorkspaceSettings } from "./client/plugins/workspace-order/hosts";
-import { addMoveToDone, contributeSidebar as workspaceOrder } from "./client/plugins/workspace-order/index";
 import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type HostFeatureId } from "./shared/features";
 
 declare const console: { warn(...args: unknown[]): void };
 
 const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
-  "host-filter": hostFilter,
+  "hide-workspaces": hideWorkspaces,
   "mark-all-read": markAllRead,
-  "merge-projects": mergeProjects,
   "merge-thinking": mergeThinking,
   themes,
-  "workspace-order": workspaceOrder,
 };
 const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "mcp-toggle": mcpToggle,
@@ -31,10 +27,10 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
 const hostSettings = hostFeatureSettings(false);
 
 export default function contribute(client: PluginClientContext) {
-  // Every copy brings its host's workspace order and hidden workspaces, whichever copy runs workspace-order's sidebar patch.
+  // Every copy brings its host's hidden workspaces and those marked as done, whichever copy runs hide-workspaces' sidebar patch.
   const leaveWorkspaces = joinWorkspaceSettings(client);
-  // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Move to Done.
-  const removeMoveToDone = whileAppFeature("workspace-order", () => addMoveToDone(client));
+  // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Mark as done.
+  const removeMarkAsDone = whileAppFeature("hide-workspaces", () => addMarkAsDone(client));
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -57,7 +53,7 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
-    removeMoveToDone();
+    removeMarkAsDone();
     leaveWorkspaces();
   };
 }

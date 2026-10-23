@@ -1,13 +1,12 @@
-import type { PluginHostSummary, PluginScreenProps, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginHostSummary, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
-// The 0.12 app has Icon and ScrollView only here; 0.13 moved them to client/ui and keeps this as an alias.
-import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
+// The 0.12 app has Icon only here; 0.13 moved it to client/ui and keeps this as an alias.
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import { SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text } from "react-native";
 import { alwaysHidden, readHidden, setHidden, subscribe } from "./hosts";
-import { readOrder, saveOrder, subscribeOrder } from "./order";
 
 type Theme = PluginSurfaceProps["theme"];
 
@@ -25,7 +24,7 @@ async function listGroupNames(serverId: string): Promise<string[]> {
 function useHostListings(hosts: readonly PluginHostSummary[]) {
   const online = hosts.filter((host) => host.status === "online").map((host) => host.serverId);
   return useQuery({
-    queryKey: ["workspace-order", online],
+    queryKey: ["hide-workspaces", online],
     queryFn: () =>
       Promise.all(
         online.map(async (serverId): Promise<HostListing> => {
@@ -39,9 +38,8 @@ function useHostListings(hosts: readonly PluginHostSummary[]) {
   });
 }
 
-/** The ordered names on top, every other group of every host below them, then the hidden ones. */
-export function WorkspaceOrder({ theme }: { theme: Theme }) {
-  const order = useSyncExternalStore(subscribeOrder, readOrder);
+/** Settings → Plugins: every group of every host the sidebar shows, then the hidden ones. */
+export function HideWorkspacesSettings({ theme }: PluginSurfaceProps) {
   const hidden = useSyncExternalStore(subscribe, readHidden);
   const hosts = useHosts();
   const listing = useHostListings(hosts);
@@ -50,33 +48,18 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const hostName = (serverId: string) => hosts.find((host) => host.serverId === serverId)?.label.trim() || serverId;
-  // Groups with the same name on several hosts are one sidebar row (merge-projects), so one row here.
+  // Hiding goes by name, so one row per name, with the hosts that have it.
   const hostsByName = new Map<string, string[]>();
   for (const host of listing.data ?? []) {
     if (!("names" in host)) continue;
     for (const name of new Set(host.names)) hostsByName.set(name, [...(hostsByName.get(name) ?? []), hostName(host.serverId)]);
   }
-  const ordered = new Set(order);
   const needle = query.trim().toLowerCase();
-  const rest = [...hostsByName.keys()]
-    .filter((name) => !ordered.has(name) && !hidden.has(name) && !alwaysHidden(name))
+  const shown = [...hostsByName.keys()]
+    .filter((name) => !hidden.has(name) && !alwaysHidden(name))
     .filter((name) => !needle || `${name} ${hostsByName.get(name)!.join(" ")}`.toLowerCase().includes(needle))
     .sort((a, b) => a.localeCompare(b));
 
-  // Shown at once; an error names the hosts that missed it.
-  const save = (names: string[]) => {
-    setSaveError(null);
-    saveOrder(names).catch((error: unknown) => setSaveError(message(error)));
-  };
-  const move = (index: number, by: number) => {
-    const next = [...order];
-    const [name] = next.splice(index, 1);
-    next.splice(index + by, 0, name!);
-    save(next);
-  };
-  const remove = (index: number) => save(order.filter((_, i) => i !== index));
-  const add = (name: string) => save([...order, name]);
-  // A hidden workspace leaves the order too; shown again, it is back with the unordered ones.
   const toggleHidden = async (name: string, hide: boolean) => {
     setSaving(name);
     setSaveError(null);
@@ -85,56 +68,23 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
     } catch (error) {
       setSaveError(message(error));
     } finally {
-      if (hide && readHidden().has(name) && readOrder().includes(name)) save(readOrder().filter((other) => other !== name));
       setSaving(null);
     }
   };
-  // Picked ones, then those listed that start with 0, which stay hidden whatever is picked.
+  // Picked ones, then those listed that start with a digit, which stay hidden whatever is picked.
   const hiddenNames = [...new Set([...hidden, ...[...hostsByName.keys()].filter(alwaysHidden)])].sort((a, b) => a.localeCompare(b));
-  const hideButton = (name: string) => (
-    <IconButton theme={theme} icon="EyeOff" label="Hide from sidebar" busy={saving === name} onPress={() => void toggleHidden(name, true)} />
-  );
 
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
   const failures = (listing.data ?? []).flatMap((host) => ("error" in host ? [host] : []));
   const offline = hosts.filter((host) => host.status !== "online");
-  // An ordered name that is not listed keeps its place: its host may only be offline.
+  // A hidden name that is not listed stays hidden: its host may only be offline.
   const missingHint = listing.isPending ? undefined : "Not on any online host";
 
   return (
     <>
       {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
-      <SettingsSection title="Ordered">
-        <SettingsCard>
-          {order.length === 0 ? (
-            <SettingsRow label="Nothing ordered yet" hint="Add workspaces from the list below." />
-          ) : (
-            order.map((name, index) => (
-              <SettingsRow key={name} label={`${index + 1}. ${name}`} hint={hostsByName.get(name)?.join(", ") ?? missingHint}>
-                <View style={{ flexDirection: "row", gap: 2 }}>
-                  <IconButton theme={theme} icon="ArrowUp" label="Move up" disabled={index === 0} onPress={() => move(index, -1)} />
-                  <IconButton
-                    theme={theme}
-                    icon="ArrowDown"
-                    label="Move down"
-                    disabled={index === order.length - 1}
-                    onPress={() => move(index, 1)}
-                  />
-                  <IconButton theme={theme} icon="X" label="Remove from order" onPress={() => remove(index)} />
-                  {hideButton(name)}
-                </View>
-              </SettingsRow>
-            ))
-          )}
-        </SettingsCard>
-        <Text style={muted}>
-          These lead the sidebar's workspaces, in this order, whichever hosts it shows. The rest follow in Paseo's order. The
-          order is saved on each host, so every app follows it, your phone included.
-        </Text>
-      </SettingsSection>
-
       <SettingsSection
-        title="Unordered"
+        title="Shown"
         trailing={
           <IconButton
             theme={theme}
@@ -149,15 +99,18 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
           <SettingsInput label="Find" placeholder="Name or host" onChangeText={setQuery} />
           {listing.isPending ? (
             <SettingsRow label="Loading workspaces…" />
-          ) : rest.length === 0 ? (
-            <SettingsRow label={needle ? "No workspace matches" : "Every workspace is ordered or hidden"} />
+          ) : shown.length === 0 ? (
+            <SettingsRow label={needle ? "No workspace matches" : "Every workspace is hidden"} />
           ) : (
-            rest.map((name) => (
+            shown.map((name) => (
               <SettingsRow key={name} label={name} hint={hostsByName.get(name)!.join(", ")}>
-                <View style={{ flexDirection: "row", gap: 2 }}>
-                  <IconButton theme={theme} icon="Plus" label="Add to order" onPress={() => add(name)} />
-                  {hideButton(name)}
-                </View>
+                <IconButton
+                  theme={theme}
+                  icon="EyeOff"
+                  label="Hide from sidebar"
+                  busy={saving === name}
+                  onPress={() => void toggleHidden(name, true)}
+                />
               </SettingsRow>
             ))
           )}
@@ -175,7 +128,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
       <SettingsSection title="Hidden">
         <SettingsCard>
           {hiddenNames.length === 0 ? (
-            <SettingsRow label="Nothing hidden" hint="Hide workspaces from the lists above." />
+            <SettingsRow label="Nothing hidden" hint="Hide workspaces from the list above." />
           ) : (
             hiddenNames.map((name) =>
               alwaysHidden(name) ? (
@@ -247,28 +200,4 @@ function IconButton({
       )}
     </Pressable>
   );
-}
-
-/** Opened from the sidebar row: the same page with its own scrolling and margins. */
-export function WorkspaceOrderScreen({ theme, layout }: PluginScreenProps) {
-  return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: layout.compact ? 16 : 28,
-          gap: layout.compact ? 20 : 28,
-          maxWidth: 760,
-          width: "100%",
-          alignSelf: "center",
-        }}
-      >
-        <WorkspaceOrder theme={theme} />
-      </ScrollView>
-    </View>
-  );
-}
-
-/** Settings → Plugins renders inside its own scrolling page. */
-export function WorkspaceOrderSettings({ theme }: PluginSurfaceProps) {
-  return <WorkspaceOrder theme={theme} />;
 }

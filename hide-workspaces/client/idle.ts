@@ -1,5 +1,5 @@
-/** How long a workspace Paseo puts in Done waits in Stale first. */
-export const STALE_FOR = 24 * 60 * 60 * 1000;
+/** How long a workspace Paseo puts in Done waits in Idle first. */
+export const IDLE_FOR = 24 * 60 * 60 * 1000;
 
 // The fields of Paseo's status grouping this plugin reads or rewrites.
 interface Row {
@@ -25,20 +25,20 @@ export interface GroupingInput {
 }
 export type BuildShortcuts = (input: { sections: Array<{ workspaces: Row[]; collapsed?: boolean }> }) => unknown;
 
-/** What a workspace moved to Done by hand is known by: it stays there until its status changes. */
+/** What a workspace marked as done by hand is known by: it stays in Done until its status changes. */
 export const doneMark = (workspaceId: string, enteredAt: number) => `${workspaceId}@${enteredAt}`;
 
-/** Whether a workspace in Done since enteredAt waits in Stale now. */
-export function waitsInStale(workspaceId: string, enteredAt: number | undefined, now: number, done: ReadonlySet<string>) {
-  return enteredAt !== undefined && now - enteredAt < STALE_FOR && !done.has(doneMark(workspaceId, enteredAt));
+/** Whether a workspace in Done since enteredAt waits in Idle now. */
+export function waitsInIdle(workspaceId: string, enteredAt: number | undefined, now: number, done: ReadonlySet<string>) {
+  return enteredAt !== undefined && now - enteredAt < IDLE_FOR && !done.has(doneMark(workspaceId, enteredAt));
 }
 
 /**
- * In status grouping, moves the workspaces that entered Done less than a day ago, and were not moved
- * on by hand, into a Stale group just above Done. Paseo lists Done newest first, so they leave it in
- * its order. Returns when the next of them turns Done, or null when none waits.
+ * In status grouping, moves the workspaces that entered Done less than a day ago, and were not marked
+ * as done by hand, into an Idle group just above Done. Paseo lists Done newest first, so they leave it
+ * in its order. Returns when the next of them turns Done, or null when none waits.
  */
-export function splitStale<Result extends Projection>(
+export function splitIdle<Result extends Projection>(
   projection: Result,
   input: GroupingInput,
   now: number,
@@ -50,23 +50,23 @@ export function splitStale<Result extends Projection>(
   const index = projection.workspaceGroups.findIndex((group) => group.key === "done");
   if (index < 0) return unchanged;
   const doneGroup = projection.workspaceGroups[index]!;
-  const stale: Row[] = [];
+  const idle: Row[] = [];
   const rest: Row[] = [];
   let turnsDoneAt: number | null = null;
   for (const row of doneGroup.rows) {
     const enteredAt = row.statusEnteredAt?.getTime();
-    if (!waitsInStale(row.workspaceId, enteredAt, now, done)) {
+    if (!waitsInIdle(row.workspaceId, enteredAt, now, done)) {
       rest.push(row);
       continue;
     }
-    stale.push(row);
-    turnsDoneAt = Math.min(turnsDoneAt ?? Infinity, enteredAt! + STALE_FOR);
+    idle.push(row);
+    turnsDoneAt = Math.min(turnsDoneAt ?? Infinity, enteredAt! + IDLE_FOR);
   }
-  if (stale.length === 0) return unchanged;
-  // Same icon as Done; Stale collapses on its own, under its own key.
+  if (idle.length === 0) return unchanged;
+  // Same icon as Done; Idle collapses on its own, under its own key.
   const groups = [
     ...projection.workspaceGroups.slice(0, index),
-    { ...doneGroup, key: "stale", label: "Stale", rows: stale },
+    { ...doneGroup, key: "idle", label: "Idle", rows: idle },
     ...(rest.length > 0 ? [{ ...doneGroup, rows: rest }] : []),
     ...projection.workspaceGroups.slice(index + 1),
   ];

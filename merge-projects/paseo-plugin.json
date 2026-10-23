@@ -1,8 +1,0 @@
-{
-  "id": "merge-projects",
-  "name": "Merge projects by name",
-  "description": "Shows same-named projects from different hosts as one sidebar project",
-  "requirements": {
-    "paseo": ">=0.11.2"
-  }
-}

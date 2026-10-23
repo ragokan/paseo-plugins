@@ -4,14 +4,12 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 
 | Plugin | What it does |
 |---|---|
-| [host-filter](host-filter) | Pick which host the sidebar shows, from the top of the sidebar. |
+| [hide-workspaces](hide-workspaces) | Hide the sidebar's workspaces you pick, and hold new Done ones in Idle for a day, with Mark as done in the command palette. |
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
-| [merge-projects](merge-projects) | Show same-named projects from different hosts as one sidebar project. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux machine the daemon runs on. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
-| [workspace-order](workspace-order) | Keep the sidebar's workspaces (ragokan, coding, ...) in your order, whichever hosts it shows, hide the ones you pick, and hold new Done ones in Stale for a day. |
 | [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
 
 Each folder's `OVERVIEW.md` explains the plugin and its limits.

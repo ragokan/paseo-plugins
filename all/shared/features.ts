@@ -6,12 +6,10 @@ import { z } from "zod";
 // saved in the app. "host" plugins act on the host they are installed on, so each host runs its own,
 // switched from that host's settings.
 export const FEATURES = [
-  { id: "host-filter", scope: "app", title: "Host filter", hint: "Pick which host the sidebar shows, from the top of the sidebar" },
+  { id: "hide-workspaces", scope: "app", title: "Hide workspaces", hint: "Hide the sidebar's workspaces you pick, and hold new Done ones in Idle for a day" },
   { id: "mark-all-read", scope: "app", title: "Mark all as read", hint: "A command palette action that marks every agent on every host as read" },
-  { id: "merge-projects", scope: "app", title: "Merge projects by name", hint: "Shows same-named projects from different hosts as one sidebar project" },
   { id: "merge-thinking", scope: "app", title: "Merge thinking into tool groups", hint: "Folds thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group" },
   { id: "themes", scope: "app", title: "Monokai themes", hint: "Monokai Pro filters as Paseo app themes" },
-  { id: "workspace-order", scope: "app", title: "Workspace order", hint: "Keep the sidebar's workspaces in your order, whichever hosts it shows, hide the ones you pick, and hold new Done ones in Stale for a day" },
   {
     id: "mcp-toggle",
     scope: "host",

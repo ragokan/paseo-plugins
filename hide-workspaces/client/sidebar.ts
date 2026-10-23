@@ -1,6 +1,5 @@
 import { alwaysHidden, readDone, readHidden, subscribe } from "./hosts";
-import { readOrder } from "./order";
-import { splitStale, type BuildShortcuts, type GroupingInput, type Projection } from "./stale";
+import { splitIdle, type BuildShortcuts, type GroupingInput, type Projection } from "./idle";
 
 declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
@@ -14,7 +13,7 @@ export interface ProjectionInput {
 type BuildProjection = ((input: ProjectionInput & GroupingInput) => Projection) & {
   original?: BuildProjection;
   loads?: number;
-  // Missing on a wrapper from before Stale.
+  // Missing on a wrapper from an older copy.
   stop?: () => void;
 };
 interface ProjectionModule {
@@ -27,27 +26,13 @@ interface OrderStore {
 export interface SidebarModules {
   projection: ProjectionModule;
   orderStore: OrderStore;
-  // Missing if Paseo renames it; Stale's shortcuts then follow Paseo's own numbering.
+  // Missing if Paseo renames it; Idle's shortcuts then follow Paseo's own numbering.
   buildShortcuts?: BuildShortcuts;
 }
 // An entry in Metro's module registry.
 interface MetroModule {
   isInitialized?: boolean;
   publicModule?: { exports?: Record<string, unknown> };
-}
-
-/**
- * Puts the named sidebar groups first, in the given order; the rest keep Paseo's order below
- * them. Only groups the sidebar already shows move, so the host filter still applies.
- */
-export function orderProjects<Input extends ProjectionInput>(input: Input, names: readonly string[]): Input {
-  if (names.length === 0) return input;
-  const rank = new Map(names.map((name, index) => [name, index]));
-  const ordered = input.projects.filter((project) => rank.has(project.projectName));
-  if (ordered.length === 0) return input;
-  // Stable, so two same-named groups on one host keep Paseo's order between them.
-  ordered.sort((a, b) => rank.get(a.projectName)! - rank.get(b.projectName)!);
-  return { ...input, projects: [...ordered, ...input.projects.filter((project) => !rank.has(project.projectName))] };
 }
 
 /**
@@ -69,10 +54,10 @@ export function hideProjects<Input extends ProjectionInput>(input: Input, names:
   };
 }
 
-// shortcut: the plugin SDK has no sidebar order API, so this finds the app's own modules among
-// those Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its
-// keyboard shortcuts, the sidebar order store, nudged so the sidebar lays itself out again, and
-// buildSidebarShortcutSections, which numbers the shortcuts again once Stale is split off.
+// shortcut: the plugin SDK has no sidebar API, so this finds the app's own modules among those
+// Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its keyboard
+// shortcuts, the sidebar order store, nudged so the sidebar lays itself out again, and
+// buildSidebarShortcutSections, which numbers the shortcuts again once Idle is split off.
 // Breaks if Paseo renames either or Metro stops keeping modules in a Map; switch to an SDK call
 // once one exists.
 export function findSidebarModules(): SidebarModules {
@@ -81,7 +66,7 @@ export function findSidebarModules(): SidebarModules {
   // Metro's require starts with modules.get(id), so asking for an id no module has hands over the
   // registry Map. The probe answers as an already loaded module, so Metro runs no module code and
   // takes no error path, which would be fatal in a release build on iOS and Android.
-  const probe = Symbol("workspace-order");
+  const probe = Symbol("hide-workspaces");
   const get = Map.prototype.get;
   let modules: Map<unknown, MetroModule> | undefined;
   Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
@@ -128,14 +113,14 @@ export function patch({ projection, orderStore, buildShortcuts }: SidebarModules
   let wrapper = projection.buildSidebarProjection;
   if (!wrapper.original) {
     const original = wrapper;
-    // Lays the sidebar out again when the next workspace in Stale turns Done.
+    // Lays the sidebar out again when the next workspace in Idle turns Done.
     let timer: unknown;
     const layout = (input: ProjectionInput & GroupingInput) => {
       const now = Date.now();
-      const result = original(orderProjects(hideProjects(input, readHidden()), readOrder()));
-      const { projection: split, turnsDoneAt } = splitStale(result, input, now, readDone(), buildShortcuts);
+      const result = original(hideProjects(input, readHidden()));
+      const { projection: split, turnsDoneAt } = splitIdle(result, input, now, readDone(), buildShortcuts);
       clearTimeout(timer);
-      // A timer can fire a little early; the second's margin keeps it from finding the row still in Stale.
+      // A timer can fire a little early; the second's margin keeps it from finding the row still in Idle.
       timer = turnsDoneAt === null ? undefined : setTimeout(() => relayout(orderStore), turnsDoneAt - now + 1000);
       return split;
     };
