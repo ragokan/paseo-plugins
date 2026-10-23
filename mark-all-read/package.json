@@ -5,6 +5,7 @@
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
+    "assets/",
     "index.client.ts"
   ],
   "scripts": {

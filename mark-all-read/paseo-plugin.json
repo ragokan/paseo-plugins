@@ -2,6 +2,10 @@
   "id": "mark-all-read",
   "name": "Mark all as read",
   "description": "A command palette action that marks every agent on every host as read",
+  "media": [
+    "assets/command-palette.png",
+    "assets/all-read.png"
+  ],
   "requirements": {
     "paseo": ">=0.12.0"
   }

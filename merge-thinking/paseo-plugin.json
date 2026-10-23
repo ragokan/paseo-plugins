@@ -2,6 +2,10 @@
   "id": "merge-thinking",
   "name": "Merge thinking into tool groups",
   "description": "Folds thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group",
+  "media": [
+    "assets/collapsed.png",
+    "assets/expanded.png"
+  ],
   "requirements": {
     "paseo": ">=0.12.0"
   }

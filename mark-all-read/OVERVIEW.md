@@ -1,5 +1,5 @@
 Adds "Mark All as Read" to the command palette. It marks every agent on every host as read, like the sidebar's "Mark as read" on each workspace at once. That includes agents hidden behind a busier workspace status, such as a finished agent in a workspace where another agent is still running. Agents waiting on a permission stay as they are, as with the sidebar's "Mark as read", and so do agents left in an archived workspace, which the app no longer shows. Hosts the app cannot reach right now are listed in an error toast; run the command again once they are back.
 
-The command shows in the palette when the current host has the plugin installed, so install it on every host you switch to. It reaches every host the app is connected to either way.
+The command shows in the palette while one of a host's pages is open, such as a chat, and that host has the plugin installed, so install it on every host you switch to. It reaches every host the app is connected to either way, and talks to nothing else.
 
 The plugin SDK can list agents but has no call to mark them read, so the plugin borrows the app's own connection to each host for that one call. It may stop working after a Paseo update; the command then shows an error toast instead of failing silently.

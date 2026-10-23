@@ -1,9 +1,12 @@
 {
-  "id": "machine-status",
-  "media": [],
+  "id": "machine-status-linux",
+  "name": "Machine status for Linux",
+  "description": "CPU, memory, disk, ports, processes and Docker for the Linux machine the daemon runs on.",
+  "media": [
+    "assets/overview.png",
+    "assets/cpu-detail.png"
+  ],
   "requirements": {
     "paseo": ">=0.12.0"
-  },
-  "name": "Machine status",
-  "description": "CPU, memory, disk, ports, processes and Docker for the Linux machine the daemon runs on."
+  }
 }

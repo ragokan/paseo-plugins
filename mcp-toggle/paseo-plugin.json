@@ -1,9 +1,12 @@
 {
   "id": "mcp-toggle",
-  "media": [],
+  "name": "MCP toggle",
+  "description": "Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer.",
+  "media": [
+    "assets/manage-servers.png",
+    "assets/composer-pill.png"
+  ],
   "requirements": {
     "paseo": ">=0.12.0"
-  },
-  "name": "MCP toggle",
-  "description": "Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer."
+  }
 }

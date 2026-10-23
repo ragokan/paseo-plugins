@@ -1,6 +1,6 @@
 Shows what the daemon's Linux machine is doing while your agents work: CPU, memory, swap, disk, power and temperature, the busiest processes, the ports agents and their dev servers listen on, and Docker. Open it from the Machine row in the sidebar or with the command center.
 
-A Linux port of [dutchakdev/machine-status](https://github.com/dutchakdev/paseo-plugin-machine-status) (MIT), without its macOS dev-cache cleaner.
+A Linux port of dutchakdev's [Machine status](https://github.com/dutchakdev/paseo-plugin-machine-status) (MIT), which reads macOS. This one reads Linux instead and leaves out the original's macOS dev-cache cleaner, so install the one that matches the daemon's machine.
 
 ## How it reads
 
