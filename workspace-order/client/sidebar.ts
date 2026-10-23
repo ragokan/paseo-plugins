@@ -1,5 +1,9 @@
-import { alwaysHidden, readHidden, subscribe } from "./hosts";
+import { alwaysHidden, readDone, readHidden, subscribe } from "./hosts";
 import { readOrder } from "./order";
+import { splitStale, type BuildShortcuts, type GroupingInput, type Projection } from "./stale";
+
+declare function setTimeout(callback: () => void, ms: number): unknown;
+declare function clearTimeout(handle: unknown): void;
 
 // The fields of Paseo's SidebarProjectionInput this plugin reads or rewrites.
 export interface ProjectionInput {
@@ -7,7 +11,12 @@ export interface ProjectionInput {
   workspaceEntriesByKey: Map<string, { projectViewKey?: string; projectName?: string }>;
 }
 
-type BuildProjection = ((input: ProjectionInput) => unknown) & { original?: BuildProjection; loads?: number };
+type BuildProjection = ((input: ProjectionInput & GroupingInput) => Projection) & {
+  original?: BuildProjection;
+  loads?: number;
+  // Missing on a wrapper from before Stale.
+  stop?: () => void;
+};
 interface ProjectionModule {
   buildSidebarProjection: BuildProjection;
 }
@@ -18,6 +27,8 @@ interface OrderStore {
 export interface SidebarModules {
   projection: ProjectionModule;
   orderStore: OrderStore;
+  // Missing if Paseo renames it; Stale's shortcuts then follow Paseo's own numbering.
+  buildShortcuts?: BuildShortcuts;
 }
 // An entry in Metro's module registry.
 interface MetroModule {
@@ -60,7 +71,8 @@ export function hideProjects<Input extends ProjectionInput>(input: Input, names:
 
 // shortcut: the plugin SDK has no sidebar order API, so this finds the app's own modules among
 // those Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its
-// keyboard shortcuts, and the sidebar order store, nudged so the sidebar lays itself out again.
+// keyboard shortcuts, the sidebar order store, nudged so the sidebar lays itself out again, and
+// buildSidebarShortcutSections, which numbers the shortcuts again once Stale is split off.
 // Breaks if Paseo renames either or Metro stops keeping modules in a Map; switch to an SDK call
 // once one exists.
 export function findSidebarModules(): SidebarModules {
@@ -85,6 +97,7 @@ export function findSidebarModules(): SidebarModules {
   if (!modules) throw new Error("Metro module registry not found");
   let projection: ProjectionModule | undefined;
   let orderStore: OrderStore | undefined;
+  let buildShortcuts: BuildShortcuts | undefined;
   // Only modules that have already run: requiring another one would run its code early.
   for (const module of modules.values()) {
     const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
@@ -94,10 +107,13 @@ export function findSidebarModules(): SidebarModules {
     if (typeof store?.setState === "function" && Array.isArray(store.getState?.().pinnedWorkspaceOrder)) {
       orderStore = store as OrderStore;
     }
+    if (typeof exports.buildSidebarShortcutSections === "function") {
+      buildShortcuts = exports.buildSidebarShortcutSections as BuildShortcuts;
+    }
   }
   if (!projection) throw new Error("Paseo sidebar layout not found");
   if (!orderStore) throw new Error("Paseo sidebar order not found");
-  return { projection, orderStore };
+  return { projection, orderStore, buildShortcuts };
 }
 
 // The sidebar recomputes its layout only when its inputs change; a fresh copy of the saved
@@ -108,12 +124,22 @@ function relayout(orderStore: OrderStore) {
 
 // The app loads this plugin once per host that has it installed, so loads share one wrapper and
 // the last one to unload restores the original.
-export function patch({ projection, orderStore }: SidebarModules): () => void {
+export function patch({ projection, orderStore, buildShortcuts }: SidebarModules): () => void {
   let wrapper = projection.buildSidebarProjection;
   if (!wrapper.original) {
     const original = wrapper;
-    const layout = (input: ProjectionInput) => original(orderProjects(hideProjects(input, readHidden()), readOrder()));
-    wrapper = Object.assign(layout, { original, loads: 0 });
+    // Lays the sidebar out again when the next workspace in Stale turns Done.
+    let timer: unknown;
+    const layout = (input: ProjectionInput & GroupingInput) => {
+      const now = Date.now();
+      const result = original(orderProjects(hideProjects(input, readHidden()), readOrder()));
+      const { projection: split, turnsDoneAt } = splitStale(result, input, now, readDone(), buildShortcuts);
+      clearTimeout(timer);
+      // A timer can fire a little early; the second's margin keeps it from finding the row still in Stale.
+      timer = turnsDoneAt === null ? undefined : setTimeout(() => relayout(orderStore), turnsDoneAt - now + 1000);
+      return split;
+    };
+    wrapper = Object.assign(layout, { original, loads: 0, stop: () => clearTimeout(timer) });
     projection.buildSidebarProjection = wrapper;
   }
   wrapper.loads! += 1;
@@ -125,7 +151,10 @@ export function patch({ projection, orderStore }: SidebarModules): () => void {
     unloaded = true;
     unsubscribe();
     wrapper.loads! -= 1;
-    if (wrapper.loads === 0) projection.buildSidebarProjection = wrapper.original!;
+    if (wrapper.loads === 0) {
+      wrapper.stop?.();
+      projection.buildSidebarProjection = wrapper.original!;
+    }
     relayout(orderStore);
   };
 }

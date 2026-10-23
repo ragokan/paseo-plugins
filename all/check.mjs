@@ -117,7 +117,7 @@ assert.deepEqual([...registered], [], "nothing starts after dispose");
 // App plugins: copies for several hosts share one realm, and only one of them runs each app plugin.
 const storage = new Map();
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
-const { joinAppFeatures, setAppFeature } = load("client/app-features.ts");
+const { joinAppFeatures, setAppFeature, whileAppFeature } = load("client/app-features.ts");
 const themesOn = new Set();
 function hostCopy(host) {
   const hostClient = {
@@ -142,6 +142,23 @@ assert.deepEqual([...themesOn], ["ragdevbox/monokai"], "another copy takes over 
 await leaveDevbox();
 assert.deepEqual([...themesOn], [], "the last copy to stop takes it down");
 
+// What every copy adds for itself while an app plugin is on, like workspace-order's Move to Done.
+const commands = new Set();
+const whileThemes = (host) => whileAppFeature("themes", () => (commands.add(host), () => commands.delete(host)));
+const stopMini = whileThemes("ragmini");
+const stopDevbox = whileThemes("ragdevbox");
+assert.deepEqual([...commands], ["ragmini", "ragdevbox"], "every copy, while it is on");
+await setAppFeature("themes", false);
+assert.deepEqual([...commands], [], "the app switch takes them off");
+await setAppFeature("themes", true);
+assert.deepEqual([...commands], ["ragmini", "ragdevbox"], "and puts them back once");
+stopMini();
+await setAppFeature("themes", false);
+await setAppFeature("themes", true);
+assert.deepEqual([...commands], ["ragdevbox"], "a copy that stops follows the switch no more");
+stopDevbox();
+assert.deepEqual([...commands], []);
+
 // Server: handlers and hooks register once and follow the switch on every call.
 const { gate } = load("server/gate.ts");
 const handlers = new Map();
@@ -164,4 +181,4 @@ assert.equal(await hooks.get("agent.session_open")({ request: { cwd: "/a" } }), 
 stopHook();
 assert.equal(hooks.size, 0, "hook remover passes through");
 
-console.log(`ok: ${features.length} features copied, ${imports} relative imports resolved, switches, sharing and gate behave`);
+console.log(`ok: ${features.length} features copied, ${imports} relative imports resolved, switches, sharing, per-copy app plugins and gate behave`);

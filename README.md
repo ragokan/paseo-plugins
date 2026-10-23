@@ -11,7 +11,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux machine the daemon runs on. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
-| [workspace-order](workspace-order) | Keep the sidebar's workspaces (ragokan, coding, ...) in your order, whichever hosts it shows, and hide the ones you pick. |
+| [workspace-order](workspace-order) | Keep the sidebar's workspaces (ragokan, coding, ...) in your order, whichever hosts it shows, hide the ones you pick, and hold new Done ones in Stale for a day. |
 | [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
 
 Each folder's `OVERVIEW.md` explains the plugin and its limits.

@@ -1,9 +1,10 @@
 import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { Platform } from "react-native";
-import { joinWorkspaceSettings } from "./client/hosts";
+import { joinWorkspaceSettings, markDone, readDone } from "./client/hosts";
 import { WorkspaceOrderScreen, WorkspaceOrderSettings } from "./client/screen";
 import { findSidebarModules, patch } from "./client/sidebar";
+import { waitsInStale } from "./client/stale";
 
 declare const console: { warn(...args: unknown[]): void };
 declare function setTimeout(callback: () => void, ms: number): unknown;
@@ -46,11 +47,35 @@ export function contributeSidebar(client: PluginClientContext) {
   };
 }
 
+/**
+ * "Move to Done" in the command palette sends the open workspace from Stale to Done. Paseo offers a
+ * copy's commands only on its own host's workspaces, so every copy adds it.
+ */
+export function addMoveToDone(client: PluginClientContext) {
+  return client.addCommandCenterItem({
+    id: "move-to-done",
+    title: "Move to Done",
+    icon: "CircleCheck",
+    keywords: ["stale", "status", "sidebar"],
+    context: "workspace",
+    onSelect: ({ workspace }) => {
+      const enteredAt = workspace.statusEnteredAt === null ? undefined : Date.parse(workspace.statusEnteredAt);
+      // Paseo shows the error in a toast.
+      if (workspace.status !== "done" || !waitsInStale(workspace.id, enteredAt, Date.now(), readDone())) {
+        throw new Error("This workspace is not in Stale");
+      }
+      return markDone(client, workspace.id, enteredAt!);
+    },
+  });
+}
+
 export default function contribute(client: PluginClientContext) {
   const leaveHosts = joinWorkspaceSettings(client);
+  const removeMoveToDone = addMoveToDone(client);
   const stopSidebar = contributeSidebar(client);
   return () => {
     stopSidebar();
+    removeMoveToDone();
     leaveHosts();
   };
 }

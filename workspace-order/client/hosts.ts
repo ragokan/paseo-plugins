@@ -1,6 +1,7 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { workspaceSettings, type WorkspaceValues } from "../shared/workspaces";
+import { doneMark, STALE_FOR } from "./stale";
 
 declare const console: { warn(...args: unknown[]): void };
 
@@ -12,16 +13,19 @@ interface Shared {
   hosts: Set<Host>;
   hidden: ReadonlySet<string>;
   order: readonly string[] | null;
+  // Missing while only copies from before Stale have published.
+  done?: ReadonlySet<string>;
   listeners: Set<() => void>;
 }
 
-const EMPTY: WorkspaceValues = { hidden: [], order: [], orderSavedAt: 0 };
+const EMPTY: WorkspaceValues = { hidden: [], order: [], orderSavedAt: 0, done: {} };
+const NONE: ReadonlySet<string> = new Set();
 const settings = settingsRpc(workspaceSettings.id);
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // The app loads a copy of this plugin for every host that has it, all in one JavaScript realm. Each
 // copy keeps its own host's settings here, and the sidebar follows all of them. Bump the version
-// when this shape changes, so copies of different versions do not share it.
+// when this shape changes in a way older copies cannot share; they leave out fields added since.
 const SHARED = Symbol.for("ragokan/paseo-plugins/workspace-order/hosts@1");
 function shared(): Shared {
   const realm = globalThis as unknown as Record<symbol, Shared | undefined>;
@@ -32,6 +36,8 @@ function shared(): Shared {
 function publish(state: Shared) {
   const hosts = [...state.hosts];
   state.hidden = new Set(hosts.flatMap((host) => host.values.hidden));
+  // A copy from before Stale read its host without done.
+  state.done = new Set(hosts.flatMap((host) => Object.entries(host.values.done ?? {}).map(([id, at]) => doneMark(id, at))));
   const newest = hosts.reduce<Host | undefined>(
     (best, host) => (host.values.orderSavedAt > (best?.values.orderSavedAt ?? 0) ? host : best),
     undefined,
@@ -95,6 +101,11 @@ export function readSyncedOrder(): readonly string[] | null {
   return shared().order;
 }
 
+/** The workspaces moved from Stale to Done by hand, as doneMark keys. */
+export function readDone(): ReadonlySet<string> {
+  return shared().done ?? NONE;
+}
+
 export function subscribe(listener: () => void) {
   const { listeners } = shared();
   listeners.add(listener);
@@ -103,11 +114,10 @@ export function subscribe(listener: () => void) {
   };
 }
 
-// Saves a change on every host the app reaches; change returns null when a host needs none.
-// Throws after trying them all.
-async function update(change: (values: WorkspaceValues) => WorkspaceValues | null) {
+// Saves a change on every host the app reaches, or on the given ones; change returns null when a
+// host needs none. Throws after trying them all.
+async function update(change: (values: WorkspaceValues) => WorkspaceValues | null, hosts = [...shared().hosts]) {
   const state = shared();
-  const hosts = [...state.hosts];
   const failures: string[] = [];
   await Promise.all(
     hosts.map(async (host) => {
@@ -154,4 +164,19 @@ export function saveSyncedOrder(names: string[]) {
   for (const host of state.hosts) host.values = { ...host.values, order: names, orderSavedAt };
   publish(state);
   return update((values) => ({ ...values, order: names, orderSavedAt }));
+}
+
+/**
+ * Moves a workspace from Stale to Done until its status changes, on the host the given copy came
+ * from: the host the workspace is on, since Paseo offers a copy's commands only on its own host's
+ * workspaces. Marks of workspaces that have been in Done a day go, since those are in Done anyway.
+ */
+export function markDone(client: PluginClientContext, workspaceId: string, enteredAt: number) {
+  const host = [...shared().hosts].find((other) => other.client === client);
+  if (!host) return Promise.reject(new Error("This host's workspace settings are not loaded"));
+  return update((values) => {
+    const now = Date.now();
+    const kept = Object.entries(values.done).filter(([id, at]) => id !== workspaceId && now - at < STALE_FOR);
+    return { ...values, done: Object.fromEntries([...kept, [workspaceId, enteredAt]]) };
+  }, [host]);
 }

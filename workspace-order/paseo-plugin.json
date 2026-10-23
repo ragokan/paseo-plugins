@@ -1,7 +1,7 @@
 {
   "id": "workspace-order",
   "name": "Workspace order",
-  "description": "Keep the sidebar's workspaces in your order, whichever hosts it shows, and hide the ones you pick",
+  "description": "Keep the sidebar's workspaces in your order, whichever hosts it shows, hide the ones you pick, and hold new Done ones in Stale for a day",
   "requirements": {
     "paseo": ">=0.12.0"
   }

@@ -1,6 +1,6 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { joinAppFeatures } from "./client/app-features";
+import { joinAppFeatures, whileAppFeature } from "./client/app-features";
 import { FeatureSettings } from "./client/settings";
 import { createSwitches, type Contribution } from "./client/switches";
 import hostFilter from "./client/plugins/host-filter/index";
@@ -11,7 +11,7 @@ import mergeProjects from "./client/plugins/merge-projects/index";
 import mergeThinking from "./client/plugins/merge-thinking/index";
 import themes from "./client/plugins/themes/index";
 import { joinWorkspaceSettings } from "./client/plugins/workspace-order/hosts";
-import { contributeSidebar as workspaceOrder } from "./client/plugins/workspace-order/index";
+import { addMoveToDone, contributeSidebar as workspaceOrder } from "./client/plugins/workspace-order/index";
 import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type HostFeatureId } from "./shared/features";
 
 declare const console: { warn(...args: unknown[]): void };
@@ -33,6 +33,8 @@ const hostSettings = hostFeatureSettings(false);
 export default function contribute(client: PluginClientContext) {
   // Every copy brings its host's workspace order and hidden workspaces, whichever copy runs workspace-order's sidebar patch.
   const leaveWorkspaces = joinWorkspaceSettings(client);
+  // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Move to Done.
+  const removeMoveToDone = whileAppFeature("workspace-order", () => addMoveToDone(client));
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -55,6 +57,7 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
+    removeMoveToDone();
     leaveWorkspaces();
   };
 }

@@ -1,7 +1,7 @@
 // Runs the plugin against the installed Paseo app bundle: finds the sidebar modules through the
 // bundle's own Metro runtime, lays out a sidebar with Paseo's real buildSidebarProjection, unpatched,
-// ordered and with workspaces hidden, and saves the order and hidden workspaces in fake hosts'
-// settings. Re-run after Paseo updates:
+// ordered, with workspaces hidden and grouped by status with Stale, and saves the order, hidden
+// workspaces and those moved to Done in fake hosts' settings. Re-run after Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -32,15 +32,24 @@ globalThis.localStorage = {
 globalThis.window = { localStorage: globalThis.localStorage };
 
 // Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
+// The entry's React Native and its page are stubbed out, as on iOS, where the page is not added.
+const stubs = {
+  "react-native": { Platform: { OS: "ios" } },
+  "react/jsx-runtime": { jsx: () => null, jsxs: () => null },
+  "@getpaseo/plugin/client/ui": {},
+  "./client/screen": {},
+};
 const pluginModules = new Map();
 function loadPlugin(file) {
   if (!pluginModules.has(file)) {
     const { outputText } = ts.transpileModule(readFileSync(path.join(root, file), "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+      fileName: file,
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
     });
     const module = { exports: {} };
     pluginModules.set(file, module);
     const localRequire = (specifier) => {
+      if (specifier in stubs) return stubs[specifier];
       if (!specifier.startsWith(".")) return require(specifier);
       const base = path.join(path.dirname(file), specifier);
       return loadPlugin([".ts", ".tsx"].map((extension) => base + extension).find((candidate) => existsSync(path.join(root, candidate))));
@@ -51,7 +60,8 @@ function loadPlugin(file) {
 }
 const { readOrder, saveOrder } = loadPlugin("client/order.ts");
 const { findSidebarModules, hideProjects, patch } = loadPlugin("client/sidebar.ts");
-const { joinWorkspaceSettings, readHidden, readSyncedOrder, setHidden } = loadPlugin("client/hosts.ts");
+const { joinWorkspaceSettings, readDone, readHidden, readSyncedOrder, setHidden } = loadPlugin("client/hosts.ts");
+const { addMoveToDone } = loadPlugin("index.client.tsx");
 const { default: contributeServer } = loadPlugin("index.server.ts");
 
 assert.throws(findSidebarModules, /Metro runtime not found/);
@@ -101,6 +111,7 @@ const ranByApp = new Set(ran);
 const found = findSidebarModules();
 assert.equal(found.projection, projection);
 assert.equal(found.orderStore, useSidebarOrderStore);
+assert.equal(found.buildShortcuts, metroRequire(idOf(".buildSidebarShortcutSections=")).buildSidebarShortcutSections);
 assert.deepEqual(ran, ranByApp, "the lookup ran no module code");
 assert.deepEqual(fatal, []);
 assert.equal(Map.prototype.get, mapGet);
@@ -167,24 +178,25 @@ assert.deepEqual(names(layout({ hosts: ALL, storedOrder })), ["ragokan", "pasode
 assert.deepEqual(names(layout({ hosts: [BOX], storedOrder })), ["coding", "pasode", "ragokan", "warp"]);
 
 const original = projection.buildSidebarProjection;
-const unpatch = patch({ projection, orderStore });
-const unpatchSecondHost = patch({ projection, orderStore });
+const unpatch = patch(found);
+const unpatchSecondHost = patch(found);
 
 // The order and hidden workspaces live in each host's settings, read and written through Paseo's settings RPC.
 const server = [];
 contributeServer({ registerSettings: (definition) => server.push(definition) });
 assert.deepEqual(server.map((definition) => definition.id), ["workspaces"]);
-assert.deepEqual(server[0].schema.parse({}), { hidden: [], order: [], orderSavedAt: 0 });
+assert.deepEqual(server[0].schema.parse({}), { hidden: [], order: [], orderSavedAt: 0, done: {} });
 
 function fakeHost(label, stored = {}) {
   const host = {
-    stored: { hidden: [], order: [], orderSavedAt: 0, ...stored },
+    stored: { hidden: [], order: [], orderSavedAt: 0, done: {}, ...stored },
     revision: 1,
     writes: 0,
     down: false,
     conflictOnce: false,
     observers: [],
     released: false,
+    commands: [],
   };
   host.client = {
     async rpc(contract, input) {
@@ -201,6 +213,10 @@ function fakeHost(label, stored = {}) {
       host.revision += 1;
       host.writes += 1;
       return { status: "saved", revision: String(host.revision), values: host.stored };
+    },
+    addCommandCenterItem(item) {
+      host.commands.push(item);
+      return () => host.commands.splice(host.commands.indexOf(item), 1);
     },
     paseo: {
       observeEvents(events) {
@@ -228,7 +244,8 @@ function fakeHost(label, stored = {}) {
   };
   return host;
 }
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+// After every pending promise; not a timer, since the Stale checks fake those.
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 const hidden = () => [...readHidden()].sort();
 
 // Each copy of the plugin brings its host's settings. Before any host has an order, the app shows
@@ -366,13 +383,150 @@ const zero = hideProjects(
 assert.deepEqual(zero.projects.map((p) => p.projectName), ["pasode", "coding"]);
 assert.equal(zero.workspaceEntriesByKey.size, 0);
 
+// Grouped by status, a workspace Paseo puts in Done waits a day in Stale, just above Done, newest
+// first like Done. Keyboard shortcuts follow, skipping a collapsed group, pinned chats first.
+const HOUR = 60 * 60 * 1000;
+const realNow = Date.now;
+const t0 = realNow();
+const timers = [];
+const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+globalThis.setTimeout = (callback, ms) => {
+  const timer = { callback, ms, cleared: false };
+  timers.push(timer);
+  return timer;
+};
+globalThis.clearTimeout = (timer) => void (timer && (timer.cleared = true));
+const waiting = () => timers.filter((timer) => !timer.cleared);
+const ROWS = [
+  ["review", "attention", 3],
+  ["build", "running", 1],
+  ["fix-login", "done", 2],
+  ["old-docs", "done", 30],
+  ["never", "done", null],
+  ["recent", "done", 0.5],
+];
+const statusLayout = ({ rows = ROWS, pinned = [], collapsed = [], pinnedCollapsed = false } = {}) => {
+  const projects = groupsFor([BOX]);
+  const coding = projects.find((p) => p.projectName === "coding").viewKey;
+  const entries = rows.map(([id, bucket, hoursAgo]) => ({
+    workspaceKey: `${BOX}:${id}`,
+    serverId: BOX,
+    workspaceId: id,
+    projectViewKey: coding,
+    projectName: "coding",
+    name: id,
+    statusBucket: bucket,
+    statusEnteredAt: hoursAgo === null ? null : new Date(t0 - hoursAgo * HOUR),
+  }));
+  return projection.buildSidebarProjection({
+    projects,
+    pinnedKeys: { pinnedWorkspaceKeys: pinned, pinnedAtByKey: Object.fromEntries(pinned.map((key) => [key, "2026-10-23"])) },
+    pinnedWorkspaceOrder: [],
+    workspaceEntriesByKey: new Map(entries.map((entry) => [entry.workspaceKey, entry])),
+    projectNamesByViewKey: new Map(projects.map((p) => [p.viewKey, p.projectName])),
+    groupMode: "status",
+    pinnedCollapsed,
+    collapsedProjectKeys: new Set(),
+    collapsedWorkspaceGroupKeys: new Set(collapsed),
+    t: (key) => key,
+  });
+};
+const statusGroups = (result) => result.workspaceGroups.map((g) => [g.key, g.label, g.rows.map((row) => row.workspaceId)]);
+const DONE = "sidebar.statusBucket.done";
+let result = statusLayout({ pinned: [`${BOX}:warp-chat`] });
+assert.deepEqual(statusGroups(result), [
+  ["attention", "sidebar.statusBucket.readyToReview", ["review"]],
+  ["running", "sidebar.statusBucket.working", ["build"]],
+  ["stale", "Stale", ["recent", "fix-login"]],
+  ["done", DONE, ["old-docs", "never"]],
+]);
+assert.deepEqual(result.workspaceGroups[2].leading, { kind: "status", bucket: "done" });
+assert.deepEqual(shortcuts(result), ["warp-chat", "review", "build", "recent", "fix-login", "old-docs", "never"]);
+assert.equal(result.shortcutModel.shortcutIndexByWorkspaceKey.get(`${BOX}:fix-login`), 5);
+assert.deepEqual(shortcuts(statusLayout({ collapsed: ["stale"] })), ["review", "build", "old-docs", "never"]);
+assert.deepEqual(shortcuts(statusLayout({ collapsed: ["done"], pinned: [`${BOX}:warp-chat`], pinnedCollapsed: true })), ["review", "build", "recent", "fix-login"]);
+// With every Done workspace in Stale, there is no Done group, as Paseo leaves out an empty one.
+assert.deepEqual(statusGroups(statusLayout({ rows: [["recent", "done", 0.5]] })), [["stale", "Stale", ["recent"]]]);
+// Nothing waiting: Paseo's own layout, and no timer.
+const settled = statusLayout({ rows: [["old-docs", "done", 30], ["build", "running", 1]] });
+assert.deepEqual(statusGroups(settled), [["running", "sidebar.statusBucket.working", ["build"]], ["done", DONE, ["old-docs"]]]);
+assert.deepEqual(waiting(), []);
+
+// The sidebar lays itself out again when the next one has waited its day, and it moves to Done.
+statusLayout();
+assert.equal(waiting().length, 1);
+// A second after it turns Done, less the few milliseconds since t0.
+const delay = waiting()[0].ms - 22 * HOUR;
+assert.ok(delay > 500 && delay <= 1000, `fix-login turns Done in 22 hours and a second, not ${waiting()[0].ms} ms`);
+before = orderStore.getState().pinnedWorkspaceOrder;
+Date.now = () => t0 + 22 * HOUR + 1000;
+waiting()[0].callback();
+assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
+assert.deepEqual(statusGroups(statusLayout()).slice(-2), [["stale", "Stale", ["recent"]], ["done", DONE, ["fix-login", "old-docs", "never"]]]);
+assert.equal(waiting().length, 1, "one timer, for recent");
+Date.now = realNow;
+// Grouped by project there is no Stale, and no timer.
+layout({ hosts: [BOX], storedOrder: [] });
+assert.deepEqual(waiting(), []);
+
+// "Move to Done" in the command palette, offered by every copy on its own host's workspaces, sends
+// a workspace in Stale to Done. It is saved on that host only, which drops marks a day old.
+const removeMoveToDone = new Map([mini, box].map((host) => [host, addMoveToDone(host.client)]));
+const [moveToDone] = box.commands;
+assert.equal(moveToDone.title, "Move to Done");
+assert.equal(moveToDone.context, "workspace");
+const select = (id, status, hoursAgo) =>
+  moveToDone.onSelect({
+    context: "workspace",
+    workspace: { id, status, statusEnteredAt: hoursAgo === null ? null : new Date(t0 - hoursAgo * HOUR).toISOString() },
+  });
+box.save({ done: { "gone-workspace": t0 - 25 * HOUR } });
+const miniWrites = mini.writes;
+before = orderStore.getState().pinnedWorkspaceOrder;
+await select("fix-login", "done", 2);
+assert.deepEqual(box.stored.done, { "fix-login": t0 - 2 * HOUR });
+assert.equal(mini.writes, miniWrites);
+assert.ok(readDone().size === 1);
+assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
+assert.deepEqual(statusGroups(statusLayout()).slice(-2), [["stale", "Stale", ["recent"]], ["done", DONE, ["fix-login", "old-docs", "never"]]]);
+// The shortcuts follow the groups, though Done is no longer newest first across Stale and Done.
+assert.deepEqual(shortcuts(statusLayout()), ["review", "build", "recent", "fix-login", "old-docs", "never"]);
+// Only a workspace in Stale moves; Paseo shows the error in a toast.
+for (const [id, status, hoursAgo] of [["fix-login", "done", 2], ["build", "running", 1], ["old-docs", "done", 30], ["never", "done", null]]) {
+  await assert.rejects(async () => select(id, status, hoursAgo), /This workspace is not in Stale/);
+}
+// Once its status changes, the mark no longer applies: done again, it waits in Stale again.
+const rerun = ROWS.map((row) => (row[0] === "fix-login" ? ["fix-login", "done", 0.1] : row));
+assert.deepEqual(statusGroups(statusLayout({ rows: rerun })).slice(-2), [["stale", "Stale", ["fix-login", "recent"]], ["done", DONE, ["old-docs", "never"]]]);
+// Another app moving one on that host shows here too.
+box.save({ done: { ...box.stored.done, recent: t0 - 0.5 * HOUR } });
+box.changed("workspaces");
+await settle();
+assert.deepEqual(statusGroups(statusLayout()).slice(-1), [["done", DONE, ["recent", "fix-login", "old-docs", "never"]]]);
+// A copy from before Stale reads its host without done; it moves nothing and breaks nothing.
+const SHARED = Symbol.for("ragokan/paseo-plugins/workspace-order/hosts@1");
+const oldCopy = { client: {}, values: { hidden: [], order: [], orderSavedAt: 0 } };
+globalThis[SHARED].hosts.add(oldCopy);
+box.changed("workspaces");
+await settle();
+assert.equal(readDone().size, 2);
+globalThis[SHARED].hosts.delete(oldCopy);
+for (const remove of removeMoveToDone.values()) remove();
+assert.deepEqual(box.commands, []);
+
 // A second host's copy wraps nothing new, and the patch stays until every copy unloads.
 await saveOrder(["warp"]);
 unpatch();
 unpatch();
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
+// The last copy to unload stops the timer.
+statusLayout({ rows: [["fresh", "done", 0.5]] });
+const [timer] = waiting();
 unpatchSecondHost();
 assert.equal(projection.buildSidebarProjection, original);
+assert.ok(timer.cleared);
+globalThis.setTimeout = realSetTimeout;
+globalThis.clearTimeout = realClearTimeout;
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["coding", "dev", "pasode", "ragokan", "warp"]);
 assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: numbered })).slice(-2), ["3608-overlays-close-on-settings", "0-scratch"], "Paseo itself shows them");
 
@@ -383,4 +537,4 @@ assert.deepEqual(readOrder(), ["warp"]);
 delete globalThis.localStorage;
 assert.deepEqual(readOrder(), []);
 globalThis.localStorage = globalThis.window.localStorage;
-console.log(`ok: sidebar layout, order store, order and hiding in ${bundlePath}`);
+console.log(`ok: sidebar layout, order store, order, hiding and Stale in ${bundlePath}`);

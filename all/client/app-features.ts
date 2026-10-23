@@ -86,6 +86,27 @@ export function setAppFeature(id: AppFeatureId, on: boolean) {
   });
 }
 
+/** Runs start in this copy while the app feature is on; the returned function stops it for good. */
+export function whileAppFeature(id: AppFeatureId, start: () => () => void) {
+  const { listeners } = shared();
+  let stop: (() => void) | undefined;
+  const sync = () => {
+    const on = shared().features[id];
+    if (on && !stop) stop = start();
+    if (!on && stop) {
+      stop();
+      stop = undefined;
+    }
+  };
+  listeners.add(sync);
+  sync();
+  return () => {
+    listeners.delete(sync);
+    stop?.();
+    stop = undefined;
+  };
+}
+
 export function useAppFeatures(): AppFeatures {
   return useSyncExternalStore(
     (listener) => {
