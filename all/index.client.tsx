@@ -1,7 +1,8 @@
 import { settingsRpc } from "@getpaseo/plugin";
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { joinAppFeatures } from "./client/app-features";
 import { FeatureSettings } from "./client/settings";
-import { createSwitches } from "./client/switches";
+import { createSwitches, type Contribution } from "./client/switches";
 import hostFilter from "./client/plugins/host-filter/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
@@ -10,39 +11,46 @@ import mergeProjects from "./client/plugins/merge-projects/index";
 import mergeThinking from "./client/plugins/merge-thinking/index";
 import themes from "./client/plugins/themes/index";
 import workspaceOrder from "./client/plugins/workspace-order/index";
-import { DEFAULT_FEATURES, featureSettings, type FeatureId } from "./shared/features";
+import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type HostFeatureId } from "./shared/features";
 
 declare const console: { warn(...args: unknown[]): void };
 
-const CONTRIBUTIONS: Record<FeatureId, typeof hostFilter> = {
+const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
   "host-filter": hostFilter,
   "mark-all-read": markAllRead,
-  "mcp-toggle": mcpToggle,
   "merge-projects": mergeProjects,
   "merge-thinking": mergeThinking,
   themes,
   "workspace-order": workspaceOrder,
+};
+const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
+  "mcp-toggle": mcpToggle,
   "machine-status": machineStatus,
 };
+const hostSettings = hostFeatureSettings(false);
 
 export default function contribute(client: PluginClientContext) {
-  const switches = createSwitches(client, CONTRIBUTIONS);
+  const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
+  const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
-  client.rpc(settingsRpc(featureSettings.id).read, {}).then(
+  client.rpc(settingsRpc(hostSettings.id).read, {}).then(
     (state) => {
-      const parsed = state.status === "ready" ? featureSettings.schema.safeParse(state.values) : null;
-      if (!parsed?.success) console.warn("[all] Features settings are unreadable; using the defaults", state);
-      void switches.apply(parsed?.success ? parsed.data : DEFAULT_FEATURES);
+      const parsed = state.status === "ready" ? hostSettings.schema.safeParse(state.values) : null;
+      if (!parsed?.success) console.warn("[all] this host's switches are unreadable; using the defaults", state);
+      void hostSwitches.apply(parsed?.success ? parsed.data : DEFAULT_HOST_FEATURES);
     },
     (error: unknown) => {
-      console.warn("[all] could not read the Features settings; using the defaults", error);
-      void switches.apply(DEFAULT_FEATURES);
+      console.warn("[all] could not read this host's switches; using the defaults", error);
+      void hostSwitches.apply(DEFAULT_HOST_FEATURES);
     },
   );
 
-  // Another open app picks up a change when it reloads; this one applies it as soon as it saves.
-  const FeatureSettingsScreen = (props: PluginSurfaceProps) => <FeatureSettings {...props} onChange={switches.apply} />;
+  // Another open app picks up a host switch when it reloads; this one applies it as soon as it saves.
+  const FeatureSettingsScreen = (props: PluginSurfaceProps) => <FeatureSettings {...props} onHostChange={hostSwitches.apply} />;
   client.addSettingsScreen({ id: "features", title: "Features", icon: "ToggleRight", Component: FeatureSettingsScreen });
 
-  return () => switches.dispose();
+  return async () => {
+    await hostSwitches.dispose();
+    await leaveApp();
+  };
 }

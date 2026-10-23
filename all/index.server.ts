@@ -2,11 +2,12 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { gate } from "./server/gate";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
-import { DEFAULT_FEATURES, featureSettings, type Features } from "./shared/features";
+import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 
 export default function contribute(server: PluginServerContext) {
-  const settings = server.registerSettings(featureSettings);
-  let features: Features = DEFAULT_FEATURES;
+  const linux = process.platform === "linux";
+  const settings = server.registerSettings(hostFeatureSettings(linux));
+  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux };
   const update = (state: Awaited<ReturnType<typeof settings.read>>) => {
     if (state.status === "ready") features = state.values;
     else console.warn("[all] Features settings are unreadable; keeping the previous switches:", state.error);

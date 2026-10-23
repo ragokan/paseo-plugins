@@ -1,7 +1,12 @@
 Every plugin in this repository in one install: host-filter, mark-all-read, mcp-toggle, merge-projects, merge-thinking, themes, workspace-order and machine-status. Each keeps its own behavior and limits, described in its folder's OVERVIEW.md.
 
-Turn them on or off from the plugin's "…" menu in Settings → Plugins → Features. Everything starts on except machine-status, which only works on a Linux daemon. The switches are saved on the daemon, so each host keeps its own. A change applies at once in the app you make it in; another open app picks it up when it reloads. While a plugin is off, its app parts are gone and its daemon parts refuse calls and leave agents alone.
+Install it on every host. The app loads a copy for each host that has it, and the copies share the work:
 
-Install it instead of the separate plugins, on every host that has them: the app loads each host's plugins, so a separate plugin left on any host shows its sidebar rows, themes and patches beside this one's. A theme you picked from the themes plugin has to be picked again under this one.
+- Host filter, mark all as read, merge projects, merge thinking, the Monokai themes and workspace order change the app itself, so one copy runs them however many hosts have the plugin, and another takes over when that host goes away.
+- MCP toggle and machine status act on their own host, so each host runs its own, and with more than one host their sidebar rows carry the host's name: "Manage MCP servers · ragdevbox". Machine status starts on only on Linux hosts.
 
-Paseo builds a plugin only from its own folder, so on install and update this plugin runs `node build.mjs`, which copies the other folders in. The daemon needs `node` on its PATH for that.
+Turn them on or off from the plugin's "…" menu in Settings → Plugins → Features. The app plugins' switches are saved in the app, so they apply to every host and are the same in every host's Features screen; on iOS and Android they stay on. Each host's own switches are saved on that host. A host switch applies at once in the app you change it in; another open app picks it up when it reloads. While a plugin is off, its app parts are gone and its daemon parts refuse calls and leave agents alone.
+
+Remove the separate plugins from every host that has them, or their sidebar rows, themes and patches appear beside this plugin's. A theme picked from the themes plugin has to be picked again under this one.
+
+Paseo builds a plugin only from its own folder, so on install and update this plugin runs `node build.mjs`, which copies the other folders in. Each daemon needs `node` on its PATH for that.

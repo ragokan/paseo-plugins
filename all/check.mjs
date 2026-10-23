@@ -11,21 +11,32 @@ import ts from "typescript";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
+// Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
+const modules = new Map();
 function load(file) {
-  const { outputText } = ts.transpileModule(readFileSync(path.join(root, file), "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  });
-  const module = { exports: {} };
-  new Function("require", "module", "exports", outputText)(require, module, module.exports);
-  return module.exports;
+  if (!modules.has(file)) {
+    const { outputText } = ts.transpileModule(readFileSync(path.join(root, file), "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
+    });
+    const module = { exports: {} };
+    modules.set(file, module);
+    const localRequire = (specifier) => {
+      if (!specifier.startsWith(".")) return require(specifier);
+      const base = path.join(path.dirname(file), specifier);
+      return load([".ts", ".tsx"].map((extension) => base + extension).find((candidate) => existsSync(path.join(root, candidate))));
+    };
+    new Function("require", "module", "exports", outputText)(localRequire, module, module.exports);
+  }
+  return modules.get(file).exports;
 }
 
 // The build copies every plugin, and every relative import still points at a file in this plugin.
 execFileSync(process.execPath, [path.join(root, "build.mjs")], { stdio: "inherit" });
-const { FEATURES, DEFAULT_FEATURES } = load("shared/features.ts");
+const { FEATURES, DEFAULT_APP_FEATURES, hostFeatureSettings } = load("shared/features.ts");
 const features = FEATURES.map((feature) => feature.id);
-assert.equal(DEFAULT_FEATURES["machine-status"], false, "machine-status starts off");
-assert.equal(DEFAULT_FEATURES.themes, true, "the rest start on");
+assert.ok(Object.values(DEFAULT_APP_FEATURES).every(Boolean), "app plugins start on");
+assert.deepEqual(hostFeatureSettings(true).schema.parse({}), { "mcp-toggle": true, "machine-status": true }, "machine status on for Linux");
+assert.deepEqual(hostFeatureSettings(false).schema.parse({}), { "mcp-toggle": true, "machine-status": false }, "and off elsewhere");
 for (const id of features) {
   assert.ok(["index.ts", "index.tsx"].some((file) => existsSync(path.join(root, "client/plugins", id, file))), `${id} client entry copied`);
 }
@@ -98,6 +109,34 @@ assert.deepEqual([...registered], [], "dispose stops everything");
 await switches.apply({ themes: true, patcher: true, broken: false });
 assert.deepEqual([...registered], [], "nothing starts after dispose");
 
+// App plugins: copies for several hosts share one realm, and only one of them runs each app plugin.
+const storage = new Map();
+globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+const { joinAppFeatures, setAppFeature } = load("client/app-features.ts");
+const themesOn = new Set();
+function hostCopy(host) {
+  const hostClient = {
+    addTheme(theme) {
+      themesOn.add(`${host}/${theme.id}`);
+      return () => themesOn.delete(`${host}/${theme.id}`);
+    },
+  };
+  // Each copy brings its own bundle, so its own contributions.
+  return joinAppFeatures(hostClient, { themes: (scoped) => void scoped.addTheme({ id: "monokai" }) });
+}
+const leaveMini = hostCopy("ragmini");
+const leaveDevbox = hostCopy("ragdevbox");
+await setAppFeature("themes", true);
+assert.deepEqual([...themesOn], ["ragmini/monokai"], "only the first copy runs the app plugin");
+await setAppFeature("themes", false);
+assert.deepEqual([...themesOn], [], "the app switch stops it");
+assert.equal(JSON.parse(storage.get("ragokan/paseo-plugins/all/app-features")).themes, false, "and is saved in the app");
+await setAppFeature("themes", true);
+await leaveMini();
+assert.deepEqual([...themesOn], ["ragdevbox/monokai"], "another copy takes over when the first stops");
+await leaveDevbox();
+assert.deepEqual([...themesOn], [], "the last copy to stop takes it down");
+
 // Server: handlers and hooks register once and follow the switch on every call.
 const { gate } = load("server/gate.ts");
 const handlers = new Map();
@@ -120,4 +159,4 @@ assert.equal(await hooks.get("agent.session_open")({ request: { cwd: "/a" } }), 
 stopHook();
 assert.equal(hooks.size, 0, "hook remover passes through");
 
-console.log(`ok: ${features.length} features copied, ${imports} relative imports resolved, switches and gate behave`);
+console.log(`ok: ${features.length} features copied, ${imports} relative imports resolved, switches, sharing and gate behave`);
