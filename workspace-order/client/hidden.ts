@@ -74,6 +74,9 @@ export function joinHiddenWorkspaces(client: PluginClientContext): () => void {
   };
 }
 
+/** A name starting with 0 never shows in the sidebar, whatever the hosts list: a way to name a workspace out of it. */
+export const alwaysHidden = (name: string) => name.startsWith("0");
+
 export function readHidden(): ReadonlySet<string> {
   return shared().hidden;
 }

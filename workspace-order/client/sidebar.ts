@@ -1,4 +1,4 @@
-import { readHidden, subscribeHidden } from "./hidden";
+import { alwaysHidden, readHidden, subscribeHidden } from "./hidden";
 import { readOrder, subscribeOrder } from "./order";
 
 // The fields of Paseo's SidebarProjectionInput this plugin reads or rewrites.
@@ -40,16 +40,16 @@ export function orderProjects<Input extends ProjectionInput>(input: Input, names
 }
 
 /**
- * Leaves the named groups out of the sidebar with their chats, pinned ones included: Paseo takes
- * pinned chats from the groups it is given. In status grouping the chats come from the workspace
- * entries, so those go too.
+ * Leaves the named groups, and those whose name starts with 0, out of the sidebar with their chats,
+ * pinned ones included: Paseo takes pinned chats from the groups it is given. In status grouping the
+ * chats come from the workspace entries, so those go too.
  */
 export function hideProjects<Input extends ProjectionInput>(input: Input, names: ReadonlySet<string>): Input {
-  if (names.size === 0) return input;
-  const hidden = new Set(input.projects.filter((project) => names.has(project.projectName)).map((project) => project.viewKey));
+  const isHidden = (name: string | undefined) => name !== undefined && (names.has(name) || alwaysHidden(name));
+  const hidden = new Set(input.projects.filter((project) => isHidden(project.projectName)).map((project) => project.viewKey));
   if (hidden.size === 0) return input;
   const shown = (entry: { projectViewKey?: string; projectName?: string }) =>
-    !(entry.projectViewKey && hidden.has(entry.projectViewKey)) && !(entry.projectName && names.has(entry.projectName));
+    !(entry.projectViewKey && hidden.has(entry.projectViewKey)) && !isHidden(entry.projectName);
   const entries = [...input.workspaceEntriesByKey].filter(([, entry]) => shown(entry));
   return {
     ...input,

@@ -10,7 +10,7 @@ declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
 
 const SCREEN_ID = "workspace-order";
-const TITLE = "Organize Workspace Order";
+const TITLE = "Organize Workspaces";
 
 function WorkspaceOrderSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (

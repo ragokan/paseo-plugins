@@ -140,8 +140,8 @@ const groupsFor = (hosts) => {
   ];
 };
 // What the sidebar shows: Paseo applies its saved group order, then lays the sidebar out.
-const layout = ({ hosts, storedOrder, pinned = [] }) => {
-  const projects = applyStoredOrdering({ items: groupsFor(hosts), storedOrder, getKey: (p) => p.viewKey });
+const layout = ({ hosts, storedOrder, pinned = [], extra = [] }) => {
+  const projects = applyStoredOrdering({ items: [...groupsFor(hosts), ...extra], storedOrder, getKey: (p) => p.viewKey });
   return projection.buildSidebarProjection({
     projects,
     pinnedKeys: { pinnedWorkspaceKeys: pinned, pinnedAtByKey: Object.fromEntries(pinned.map((key) => [key, "2026-10-23"])) },
@@ -293,6 +293,12 @@ assert.deepEqual(pinned.map((chat) => chat.workspaceId), ["warp-chat"]);
 await setHidden("pasode", false);
 assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan", "pasode", "coding", "warp"]);
 
+// A name starting with 0 is always hidden, picked or not, with its shortcuts.
+const scratch = group("0-scratch", [BOX], `host:${BOX}:/home/0-scratch`);
+assert.ok(!readHidden().has("0-scratch"));
+assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })), ["ragokan", "pasode", "coding", "warp"]);
+assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
+
 // Status grouping takes chats from the workspace entries; a hidden group's go, by key or by name.
 const entries = new Map([
   ["a", { projectViewKey: "k-pasode", projectName: "pasode" }],
@@ -307,6 +313,15 @@ const statusInput = hideProjects({ projects, workspaceEntriesByKey: entries }, n
 assert.deepEqual(statusInput.projects.map((p) => p.projectName), ["coding"]);
 assert.deepEqual([...statusInput.workspaceEntriesByKey.keys()], ["b"]);
 assert.equal(hideProjects({ projects, workspaceEntriesByKey: entries }, new Set(["dev"])).projects, projects);
+const zero = hideProjects(
+  {
+    projects: [...projects, { projectName: "0-scratch", viewKey: "k-zero" }],
+    workspaceEntriesByKey: new Map([["z", { projectViewKey: "prj_zero", projectName: "0-scratch" }]]),
+  },
+  new Set(),
+);
+assert.deepEqual(zero.projects.map((p) => p.projectName), ["pasode", "coding"]);
+assert.equal(zero.workspaceEntriesByKey.size, 0);
 
 // iOS and Android: no localStorage, so no order, and nothing throws.
 delete globalThis.localStorage;
@@ -321,5 +336,6 @@ assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
 unpatchSecondHost();
 assert.equal(projection.buildSidebarProjection, original);
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["coding", "dev", "pasode", "ragokan", "warp"]);
+assert.ok(names(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })).includes("0-scratch"), "Paseo itself shows it");
 for (const stop of leave.values()) stop();
 console.log(`ok: sidebar layout, order store and hiding in ${bundlePath}`);

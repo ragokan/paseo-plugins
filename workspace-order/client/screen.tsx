@@ -6,7 +6,7 @@ import { SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getp
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { readHidden, setHidden, subscribeHidden } from "./hidden";
+import { alwaysHidden, readHidden, setHidden, subscribeHidden } from "./hidden";
 import { readOrder, saveOrder, subscribeOrder } from "./order";
 
 type Theme = PluginSurfaceProps["theme"];
@@ -59,7 +59,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
   const ordered = new Set(order);
   const needle = query.trim().toLowerCase();
   const rest = [...hostsByName.keys()]
-    .filter((name) => !ordered.has(name) && !hidden.has(name))
+    .filter((name) => !ordered.has(name) && !hidden.has(name) && !alwaysHidden(name))
     .filter((name) => !needle || `${name} ${hostsByName.get(name)!.join(" ")}`.toLowerCase().includes(needle))
     .sort((a, b) => a.localeCompare(b));
 
@@ -84,6 +84,8 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
       setSaving(null);
     }
   };
+  // Picked ones, then those listed that start with 0, which stay hidden whatever is picked.
+  const hiddenNames = [...new Set([...hidden, ...[...hostsByName.keys()].filter(alwaysHidden)])].sort((a, b) => a.localeCompare(b));
   const hideButton = (name: string) => (
     <IconButton theme={theme} icon="EyeOff" label="Hide from sidebar" busy={saving === name} onPress={() => void toggleHidden(name, true)} />
   );
@@ -165,12 +167,13 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
 
       <SettingsSection title="Hidden">
         <SettingsCard>
-          {hidden.size === 0 ? (
+          {hiddenNames.length === 0 ? (
             <SettingsRow label="Nothing hidden" hint="Hide workspaces from the lists above." />
           ) : (
-            [...hidden]
-              .sort((a, b) => a.localeCompare(b))
-              .map((name) => (
+            hiddenNames.map((name) =>
+              alwaysHidden(name) && !hidden.has(name) ? (
+                <SettingsRow key={name} label={name} hint="Starts with 0, so always hidden" />
+              ) : (
                 <SettingsRow key={name} label={name} hint={hostsByName.get(name)?.join(", ") ?? missingHint}>
                   <IconButton
                     theme={theme}
@@ -180,13 +183,14 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
                     onPress={() => void toggleHidden(name, false)}
                   />
                 </SettingsRow>
-              ))
+              ),
+            )
           )}
         </SettingsCard>
         {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
         <Text style={muted}>
           Hidden workspaces leave the sidebar with their chats, pinned ones included, here and on your phone. The list is
-          saved on each host.
+          saved on each host. Workspaces whose name starts with 0 are always hidden.
         </Text>
       </SettingsSection>
     </>
