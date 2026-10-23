@@ -4,7 +4,6 @@ import type {
   PluginHostProps,
   PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
-import { useHosts } from "@getpaseo/plugin/client";
 import * as ui from "@getpaseo/plugin/client/ui";
 import type { ComponentType, FunctionComponent } from "react";
 
@@ -56,7 +55,7 @@ interface OpenScreenApi {
 }
 
 /** `@getpaseo/plugin/client/ui` gained this in 0.11; the older app runtime has no such export. */
-type SidebarRowComponent = ComponentType<{ icon?: string; label?: string; active?: boolean; onPress(): void }>;
+type SidebarRowComponent = ComponentType<{ icon?: string; active?: boolean; onPress(): void }>;
 
 /** What the screen receives on either API: 0.11 adds `params`, older hosts do not. */
 export type MachineScreenProps = PluginSurfaceProps & { params?: ScreenParams };
@@ -88,9 +87,7 @@ export function registerMachineScreen(
   client.addSidebarItem({ id: SCREEN_ID, title: TITLE, icon: ICON, surface: SCREEN_ID });
 }
 
-function MachineSidebarItem({ currentScreen, host, openScreen }: SidebarItemProps) {
-  // Each host with this plugin adds a row for its own machine, so the rows name their host.
-  const multipleHosts = useHosts().length > 1;
+function MachineSidebarItem({ currentScreen, openScreen }: SidebarItemProps) {
   // Read off the namespace: the 0.8–0.10 ui runtime has no SidebarRow, and the
   // item renders nothing rather than crash.
   const SidebarRow = (ui as { SidebarRow?: SidebarRowComponent }).SidebarRow;
@@ -98,7 +95,6 @@ function MachineSidebarItem({ currentScreen, host, openScreen }: SidebarItemProp
   return (
     <SidebarRow
       icon={ICON}
-      label={multipleHosts ? `${TITLE} · ${host.label}` : undefined}
       active={currentScreen?.screenId === SCREEN_ID}
       onPress={() => openScreen({ screenId: SCREEN_ID })}
     />
