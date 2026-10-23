@@ -1,5 +1,6 @@
-// Runs the plugin against the installed Paseo app bundle: finds the grouping and i18next modules,
-// then groups and labels a real-shaped timeline through Paseo's own code. Re-run after Paseo updates:
+// Runs the plugin against the installed Paseo app bundle: finds the grouping and i18next modules
+// through the bundle's own Metro runtime, then groups and labels a real-shaped timeline through
+// Paseo's own code. Re-run after Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -18,47 +19,121 @@ const bundle = readFileSync(bundlePath, "utf8");
 const { outputText } = ts.transpileModule(readFileSync(new URL("index.client.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 });
-// Each call evaluates a fresh copy of the plugin, as when Paseo reloads it.
+// Each call evaluates a fresh copy of the plugin, as when Paseo reloads it. Loaded as on iOS, where
+// the plugin used to do nothing.
+const require = (name) => (name === "react-native" ? { Platform: { OS: "ios" } } : {});
 function loadPlugin() {
   const plugin = { exports: {} };
-  new Function("require", "module", "exports", outputText)(() => ({}), plugin, plugin.exports);
+  new Function("require", "module", "exports", outputText)(require, plugin, plugin.exports);
   return plugin.exports;
 }
-const { findModules, patch } = loadPlugin();
+const { default: contribute, findModules, patch } = loadPlugin();
 
-// Minimal Metro runtime over the bundle's own module lines, so the test runs Paseo's real code.
-// A module starts a line with `__d(` and may span lines (template literals).
+assert.throws(findModules, /Metro runtime not found/);
+
+// The bundle's own Metro runtime (the same one the iOS and Android builds use), with an ErrorUtils
+// like React Native's, whose fatal report crashes a release build.
+const mapGet = Map.prototype.get;
+const fatal = [];
+globalThis.ErrorUtils = { reportFatalError: (error) => fatal.push(error) };
+globalThis.__METRO_GLOBAL_PREFIX__ = "";
+(0, eval)(bundle.split("\n").find((line) => line.includes("Requiring unknown module")));
+const metroDefine = globalThis.__d;
+
+// Each module's source and imports. A module starts a line with `__d(` and may span lines
+// (template literals).
 const lines = new Map();
+const imports = new Map();
 let current;
 for (const line of bundle.split("\n")) {
   if (line.startsWith("__d(")) current = line;
   else if (current !== undefined) current += `\n${line}`;
   const match = current !== undefined && /\},(\d+),\[([\d,]*)\]\);$/.exec(current);
-  if (match) lines.set(Number(match[1]), current), (current = undefined);
+  if (!match) continue;
+  lines.set(Number(match[1]), current);
+  imports.set(Number(match[1]), match[2] ? match[2].split(",").map(Number) : []);
+  current = undefined;
 }
-const modules = new Map();
-function metroRequire(id) {
-  if (!modules.has(id)) {
-    let definition;
-    new Function("__d", lines.get(id))((factory, _id, deps) => (definition = { factory, deps }));
-    const module = { exports: {} };
-    modules.set(id, module);
-    definition.factory(globalThis, metroRequire, metroRequire, metroRequire, module, module.exports, definition.deps);
-  }
-  return modules.get(id).exports;
-}
+const moduleWith = (needle) => [...lines].find(([, source]) => source.includes(needle))[0];
 
-async function lookup(source) {
-  globalThis.document = { scripts: [{ src: "app://other.js" }, { src: "app:///_expo/static/js/web/index.js" }] };
-  globalThis.fetch = async () => ({ text: async () => source });
-  globalThis.__r = metroRequire;
-  return findModules();
+// Defines the modules the timeline needs and everything they import, counting which module
+// factories run.
+const ran = new Set();
+globalThis.__d = (factory, id, deps) =>
+  metroDefine(function (...args) {
+    ran.add(id);
+    return factory.apply(this, args);
+  }, id, deps);
+const defined = new Set();
+function define(id) {
+  if (defined.has(id)) return;
+  defined.add(id);
+  (0, eval)(lines.get(id));
+  imports.get(id).forEach(define);
 }
+const i18nId = moduleWith(".initReactI18next).init(");
+const presentationId = moduleWith("e.createStreamPresentation=function");
+const transformerId = moduleWith("e.transformTimelineItem=function");
+[i18nId, presentationId, transformerId].forEach(define);
 
-const { grouping: module, i18n } = await lookup(bundle);
-await assert.rejects(lookup("__d(function(){},1,[]);"), /tool call grouping not found/);
+// Nothing loaded yet: the lookup finds nothing and runs no module code.
+assert.throws(findModules, /tool call grouping not found/);
+assert.equal(ran.size, 0);
+
+// The app has started but opened no chat, as on a phone showing the agent list: i18next has loaded
+// and the grouping module hasn't, so the plugin waits for the first thought the app transforms.
+globalThis.__r(i18nId);
+const transformers = [];
+const client = {
+  addTimelineTransformer(transformer) {
+    transformers.push(transformer);
+    return () => transformers.includes(transformer) && transformers.splice(transformers.indexOf(transformer), 1);
+  },
+};
+const timers = [];
+const { setTimeout } = globalThis;
+globalThis.setTimeout = (callback) => timers.push(callback);
+const stop = contribute(client);
+assert.equal(transformers.length, 1);
+assert.equal(transformers[0].query.itemType, "reasoning");
+
+// The first chat opens: the app loads its timeline code and draws it through Paseo's own
+// presentation, passing items to the plugin transformers the way the app's registry does.
+const { transformTimelineItem } = globalThis.__r(transformerId);
+const present = globalThis.__r(presentationId).createStreamPresentation();
+const transform = (input) => transformTimelineItem({ ...input, plugins: [{ id: "merge-thinking", timelineTransformers: transformers }] });
+const firstChat = { tail: [], head: [], transform, level: "overview", isTurnActive: true };
+let k = 0;
+const at = new Date(0);
+firstChat.tail = [
+  { kind: "user_message", id: `first${k++}`, text: "go", timestamp: at },
+  { kind: "thought", id: `first${k++}`, text: "a", status: "ready", timestamp: at },
+  { kind: "thought", id: `first${k++}`, text: "b", status: "ready", timestamp: at },
+  { kind: "assistant_message", id: `first${k++}`, text: "done", timestamp: at },
+];
+const firstRender = present(firstChat);
+// That chat merges in its first render, and the transformer changed nothing and goes after it.
+assert.deepEqual(firstRender.tail.map((item) => (firstRender.groupsByHostId.has(item.id) ? "group" : item.kind)), ["user_message", "group", "assistant_message"]);
+assert.deepEqual(firstRender.groupsByHostId.get(firstChat.tail[1].id).run.calls.map((call) => call.id), [firstChat.tail[1].id, firstChat.tail[2].id]);
+assert.equal(transformers.length, 1);
+timers.splice(0).forEach((callback) => callback());
+assert.equal(transformers.length, 0);
+globalThis.setTimeout = setTimeout;
+
+const { grouping: module, i18n } = findModules();
+assert.equal(module.mergeThinking?.copies.length, 1);
 assert.ok(i18n, "Paseo's i18next instance not found");
 assert.equal(typeof i18n.getFixedT, "function");
+assert.deepEqual(fatal, []);
+assert.equal(Map.prototype.get, mapGet);
+// The plugin unloads; a copy that found the modules at once never adds a transformer.
+stop();
+assert.equal(module.mergeThinking, undefined);
+const stopLoaded = contribute(client);
+assert.equal(transformers.length, 0);
+assert.equal(module.mergeThinking?.copies.length, 1);
+stopLoaded();
+assert.equal(module.mergeThinking, undefined);
 
 // The plugin relies on Paseo drawing thoughts as the tool call "thinking", and on the timeline
 // drawing a non-agent tool call from toolName/arguments/status.
@@ -86,8 +161,7 @@ function label(summary) {
 }
 
 // Paseo's own caller, which reaches the grouping functions through the module's exports.
-const callerId = [...lines].find(([, line]) => line.includes("e.prepareToolCallHistory=function"))[0];
-const caller = metroRequire(callerId);
+const caller = globalThis.__r(moduleWith("e.prepareToolCallHistory=function"));
 function project(tail, head) {
   const preparedHistory = caller.prepareToolCallHistory("overview", tail);
   return caller.projectToolCallDetailLevel({ level: "overview", tail, head, preparedHistory, isTurnActive: true });

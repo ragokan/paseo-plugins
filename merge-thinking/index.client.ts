@@ -1,10 +1,8 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { Platform } from "react-native";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
-declare const document: { scripts: ArrayLike<{ src: string }> };
-declare function fetch(url: string): Promise<{ text(): Promise<string> }>;
 declare const console: { warn(...args: unknown[]): void };
+declare function setTimeout(callback: () => void, ms: number): unknown;
 
 // The fields of Paseo's stream items, tool call groups and i18next instance this plugin uses.
 export interface StreamItem {
@@ -43,6 +41,11 @@ type GroupingFunctions = Pick<GroupingModule, "prepareGroupedHistory" | "groupLi
 interface I18n {
   t(...args: unknown[]): string;
   mergeThinking?: { t: I18n["t"] };
+}
+// An entry in Metro's module registry.
+interface MetroModule {
+  isInitialized?: boolean;
+  publicModule?: { exports?: { [name: string]: unknown } };
 }
 
 const SOURCE = "merge-thinking";
@@ -130,23 +133,40 @@ function withThoughts(buildGroup: BuildGroup, labelThoughts: boolean): BuildGrou
 }
 
 // shortcut: the plugin SDK only transforms one timeline item at a time and has no label API, so
-// this finds the app's tool call grouping and i18next modules in its Metro bundle and wraps
-// prepareGroupedHistory, groupLiveToolCalls and t(), which the app calls through those objects.
-// Desktop/web only, and breaks if Paseo renames them; switch to an SDK call once one exists.
-export async function findModules(): Promise<{ grouping: GroupingModule; i18n?: I18n }> {
-  const bundle = Array.from(document.scripts).find((script) => script.src.includes("/_expo/static/js/"));
-  if (!bundle) throw new Error("Paseo app bundle not found");
-  const source = await (await fetch(bundle.src)).text();
-  const metroRequire = (globalThis as { __r?: (id: number) => unknown }).__r;
-  const moduleWith = (needle: string) => {
-    const start = source.indexOf(needle);
-    // Each Metro module ends its last line with `},<moduleId>,[<deps>]);`.
-    const end = /\},(\d+),\[[\d,]*\]\);(?:\n|$)/g;
-    end.lastIndex = start;
-    const moduleId = start < 0 ? undefined : end.exec(source)?.[1];
-    return moduleId && metroRequire ? metroRequire(Number(moduleId)) : undefined;
+// this finds the app's tool call grouping and i18next modules among the modules Metro has loaded
+// and wraps prepareGroupedHistory, groupLiveToolCalls and t(), which the app calls through those
+// objects. Breaks if Paseo renames them or Metro stops keeping modules in a Map; switch to an SDK
+// call once one exists.
+export function findModules(): { grouping: GroupingModule; i18n?: I18n } {
+  const metroRequire = (globalThis as { __r?: (id: unknown) => unknown }).__r;
+  if (typeof metroRequire !== "function") throw new Error("Metro runtime not found");
+  // Metro's require starts with modules.get(id), so asking for an id no module has hands over the
+  // registry Map. The probe answers as an already loaded module, so Metro runs no module code and
+  // takes no error path, which would be fatal in a release build on iOS and Android.
+  const probe = Symbol("merge-thinking");
+  const get = Map.prototype.get;
+  let modules: Map<unknown, MetroModule> | undefined;
+  Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+    if (key !== probe) return get.call(this, key);
+    modules = this as Map<unknown, MetroModule>;
+    return { isInitialized: true, publicModule: { exports: undefined } };
   };
-  const grouping = moduleWith(".prepareGroupedHistory=function") as Partial<GroupingModule> | undefined;
+  try {
+    metroRequire(probe);
+  } finally {
+    Map.prototype.get = get;
+  }
+  if (!modules) throw new Error("Metro module registry not found");
+  let grouping: Partial<GroupingModule> | undefined;
+  let i18n: I18n | undefined;
+  // Only modules that have already run: requiring another one would run its code early.
+  for (const module of modules.values()) {
+    const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
+    if (!exports) continue;
+    if (typeof exports.prepareGroupedHistory === "function") grouping = exports as Partial<GroupingModule>;
+    const instance = exports.i18n as Partial<I18n> | undefined;
+    if (typeof instance?.t === "function") i18n = instance as I18n;
+  }
   if (
     typeof grouping?.prepareGroupedHistory !== "function" ||
     typeof grouping.groupLiveToolCalls !== "function" ||
@@ -155,8 +175,7 @@ export async function findModules(): Promise<{ grouping: GroupingModule; i18n?: 
     throw new Error("Paseo tool call grouping not found");
   }
   // Without the app's i18next instance, groups still merge; their labels just leave thoughts out.
-  const i18n = (moduleWith(".initReactI18next).init(") as { i18n?: Partial<I18n> } | undefined)?.i18n;
-  return { grouping: grouping as GroupingModule, i18n: typeof i18n?.t === "function" ? (i18n as I18n) : undefined };
+  return { grouping: grouping as GroupingModule, i18n };
 }
 
 // The app loads this plugin once per host that has it installed, and again on every reload. The
@@ -201,15 +220,38 @@ export function patch(module: GroupingModule, i18n?: I18n): () => void {
   };
 }
 
-export default function contribute(_client: PluginClientContext) {
-  // The module lookup reads the web bundle, so iOS and Android keep Paseo's own grouping.
-  if (Platform.OS !== "web") return () => {};
-  const unpatch = findModules().then(
-    ({ grouping, i18n }) => patch(grouping, i18n),
-    (error) => {
-      console.warn("[merge-thinking]", error);
-      return () => {};
-    },
-  );
-  return async () => (await unpatch)();
+export default function contribute(client: PluginClientContext) {
+  let unpatch: (() => void) | undefined;
+  let stopWaiting: (() => unknown) | undefined;
+  const attach = () => {
+    const { grouping, i18n } = findModules();
+    unpatch = patch(grouping, i18n);
+  };
+  try {
+    attach();
+  } catch {
+    // The grouping module loads with the first chat, which passes its thoughts through plugin
+    // timeline transformers right before it groups them. One that changes nothing patches then, so
+    // that chat already merges, and is removed after that render.
+    let looked = false;
+    stopWaiting = client.addTimelineTransformer({
+      id: "attach",
+      query: { itemType: "reasoning" },
+      transform() {
+        if (looked) return undefined;
+        looked = true;
+        try {
+          attach();
+        } catch (error) {
+          console.warn("[merge-thinking]", error);
+        }
+        setTimeout(() => stopWaiting?.(), 0);
+        return undefined;
+      },
+    });
+  }
+  return () => {
+    stopWaiting?.();
+    unpatch?.();
+  };
 }
