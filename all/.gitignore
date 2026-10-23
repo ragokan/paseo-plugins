@@ -1,0 +1,5 @@
+node_modules/
+# Written by build.mjs from the other plugin folders.
+client/plugins/
+server/plugins/
+shared/plugins/
