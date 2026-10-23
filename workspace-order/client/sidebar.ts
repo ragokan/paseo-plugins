@@ -1,5 +1,5 @@
-import { alwaysHidden, readHidden, subscribeHidden } from "./hidden";
-import { readOrder, subscribeOrder } from "./order";
+import { alwaysHidden, readHidden, subscribe } from "./hosts";
+import { readOrder } from "./order";
 
 // The fields of Paseo's SidebarProjectionInput this plugin reads or rewrites.
 export interface ProjectionInput {
@@ -117,15 +117,13 @@ export function patch({ projection, orderStore }: SidebarModules): () => void {
     projection.buildSidebarProjection = wrapper;
   }
   wrapper.loads! += 1;
-  const unsubscribeOrder = subscribeOrder(() => relayout(orderStore));
-  const unsubscribeHidden = subscribeHidden(() => relayout(orderStore));
+  const unsubscribe = subscribe(() => relayout(orderStore));
   relayout(orderStore);
   let unloaded = false;
   return () => {
     if (unloaded) return;
     unloaded = true;
-    unsubscribeOrder();
-    unsubscribeHidden();
+    unsubscribe();
     wrapper.loads! -= 1;
     if (wrapper.loads === 0) projection.buildSidebarProjection = wrapper.original!;
     relayout(orderStore);

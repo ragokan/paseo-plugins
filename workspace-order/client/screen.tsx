@@ -6,7 +6,7 @@ import { SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getp
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { alwaysHidden, readHidden, setHidden, subscribeHidden } from "./hidden";
+import { alwaysHidden, readHidden, setHidden, subscribe } from "./hosts";
 import { readOrder, saveOrder, subscribeOrder } from "./order";
 
 type Theme = PluginSurfaceProps["theme"];
@@ -42,7 +42,7 @@ function useHostListings(hosts: readonly PluginHostSummary[]) {
 /** The ordered names on top, every other group of every host below them, then the hidden ones. */
 export function WorkspaceOrder({ theme }: { theme: Theme }) {
   const order = useSyncExternalStore(subscribeOrder, readOrder);
-  const hidden = useSyncExternalStore(subscribeHidden, readHidden);
+  const hidden = useSyncExternalStore(subscribe, readHidden);
   const hosts = useHosts();
   const listing = useHostListings(hosts);
   const [query, setQuery] = useState("");
@@ -63,14 +63,19 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
     .filter((name) => !needle || `${name} ${hostsByName.get(name)!.join(" ")}`.toLowerCase().includes(needle))
     .sort((a, b) => a.localeCompare(b));
 
+  // Shown at once; an error names the hosts that missed it.
+  const save = (names: string[]) => {
+    setSaveError(null);
+    saveOrder(names).catch((error: unknown) => setSaveError(message(error)));
+  };
   const move = (index: number, by: number) => {
     const next = [...order];
     const [name] = next.splice(index, 1);
     next.splice(index + by, 0, name!);
-    saveOrder(next);
+    save(next);
   };
-  const remove = (index: number) => saveOrder(order.filter((_, i) => i !== index));
-  const add = (name: string) => saveOrder([...order, name]);
+  const remove = (index: number) => save(order.filter((_, i) => i !== index));
+  const add = (name: string) => save([...order, name]);
   // A hidden workspace leaves the order too; shown again, it is back with the unordered ones.
   const toggleHidden = async (name: string, hide: boolean) => {
     setSaving(name);
@@ -80,7 +85,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
     } catch (error) {
       setSaveError(message(error));
     } finally {
-      if (hide && readHidden().has(name)) saveOrder(readOrder().filter((other) => other !== name));
+      if (hide && readHidden().has(name) && readOrder().includes(name)) save(readOrder().filter((other) => other !== name));
       setSaving(null);
     }
   };
@@ -98,6 +103,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
 
   return (
     <>
+      {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
       <SettingsSection title="Ordered">
         <SettingsCard>
           {order.length === 0 ? (
@@ -122,7 +128,8 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
           )}
         </SettingsCard>
         <Text style={muted}>
-          These lead the sidebar's workspaces, in this order, whichever hosts it shows. The rest follow in Paseo's order.
+          These lead the sidebar's workspaces, in this order, whichever hosts it shows. The rest follow in Paseo's order. The
+          order is saved on each host, so every app follows it, your phone included.
         </Text>
       </SettingsSection>
 
@@ -187,7 +194,6 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
             )
           )}
         </SettingsCard>
-        {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
         <Text style={muted}>
           Hidden workspaces leave the sidebar with their chats, pinned ones included, here and on your phone. The list is
           saved on each host. Workspaces whose name starts with a digit are always hidden.

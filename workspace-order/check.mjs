@@ -1,7 +1,7 @@
 // Runs the plugin against the installed Paseo app bundle: finds the sidebar modules through the
 // bundle's own Metro runtime, lays out a sidebar with Paseo's real buildSidebarProjection, unpatched,
-// ordered and with workspaces hidden, and hides workspaces through fake hosts' settings. Re-run after
-// Paseo updates:
+// ordered and with workspaces hidden, and saves the order and hidden workspaces in fake hosts'
+// settings. Re-run after Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -22,7 +22,7 @@ const bundlePath =
     .sort((a, b) => statSync(b).size - statSync(a).size)[0];
 const bundle = readFileSync(bundlePath, "utf8");
 
-// The plugin's order lives in the app's localStorage, as does Paseo's, which its order store writes.
+// Paseo's order store writes the app's localStorage, where the plugin also kept its order before the hosts did.
 const storage = new Map();
 globalThis.localStorage = {
   getItem: (key) => storage.get(key) ?? null,
@@ -51,7 +51,7 @@ function loadPlugin(file) {
 }
 const { readOrder, saveOrder } = loadPlugin("client/order.ts");
 const { findSidebarModules, hideProjects, patch } = loadPlugin("client/sidebar.ts");
-const { joinHiddenWorkspaces, readHidden, setHidden } = loadPlugin("client/hidden.ts");
+const { joinWorkspaceSettings, readHidden, readSyncedOrder, setHidden } = loadPlugin("client/hosts.ts");
 const { default: contributeServer } = loadPlugin("index.server.ts");
 
 assert.throws(findSidebarModules, /Metro runtime not found/);
@@ -170,38 +170,27 @@ const original = projection.buildSidebarProjection;
 const unpatch = patch({ projection, orderStore });
 const unpatchSecondHost = patch({ projection, orderStore });
 
-// Ordered by name, the groups keep your order on every host filter, ahead of the rest, which keep
-// Paseo's order. dev is only on MINI and stays out of BOX's sidebar.
-saveOrder(["ragokan", "pasode", "coding"]);
-for (const order of [storedOrder, []]) {
-  assert.deepEqual(names(layout({ hosts: ALL, storedOrder: order })).slice(0, 3), ["ragokan", "pasode", "coding"]);
-  assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: order })), ["ragokan", "pasode", "coding", "warp"]);
-  assert.deepEqual(names(layout({ hosts: [MINI], storedOrder: order })), ["ragokan", "coding", "dev"]);
-}
-assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["ragokan", "pasode", "coding", "dev", "warp"]);
-// Keyboard shortcuts walk the same order.
-const shortcuts = (result) => result.shortcutModel.shortcutTargets.map((target) => target.workspaceId);
-assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
-
-// Saving an order makes the sidebar lay itself out again.
-let before = orderStore.getState().pinnedWorkspaceOrder;
-saveOrder(["warp"]);
-assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
-assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["warp", "coding", "dev", "pasode", "ragokan"]);
-
-// Hidden workspaces live in each host's settings, read and written through Paseo's settings RPC.
+// The order and hidden workspaces live in each host's settings, read and written through Paseo's settings RPC.
 const server = [];
 contributeServer({ registerSettings: (definition) => server.push(definition) });
-assert.deepEqual(server.map((definition) => definition.id), ["hidden-workspaces"]);
-assert.deepEqual(server[0].schema.parse({}), { names: [] });
+assert.deepEqual(server.map((definition) => definition.id), ["workspaces"]);
+assert.deepEqual(server[0].schema.parse({}), { hidden: [], order: [], orderSavedAt: 0 });
 
-function fakeHost(label, hidden = []) {
-  const host = { stored: { names: hidden }, revision: 1, writes: 0, down: false, conflictOnce: false, observers: [], released: false };
+function fakeHost(label, stored = {}) {
+  const host = {
+    stored: { hidden: [], order: [], orderSavedAt: 0, ...stored },
+    revision: 1,
+    writes: 0,
+    down: false,
+    conflictOnce: false,
+    observers: [],
+    released: false,
+  };
   host.client = {
     async rpc(contract, input) {
       if (host.down) throw new Error(`${label} is unreachable`);
-      if (contract.name === "settings.hidden-workspaces.read") return { status: "ready", revision: String(host.revision), values: host.stored };
-      assert.equal(contract.name, "settings.hidden-workspaces.write");
+      if (contract.name === "settings.workspaces.read") return { status: "ready", revision: String(host.revision), values: host.stored };
+      assert.equal(contract.name, "settings.workspaces.write");
       if (host.conflictOnce) {
         // Another app saved first.
         host.conflictOnce = false;
@@ -227,6 +216,11 @@ function fakeHost(label, hidden = []) {
       },
     },
   };
+  // Another app saving on this host, and the event the host sends for it.
+  host.save = (values) => {
+    host.stored = { ...host.stored, ...values };
+    host.revision += 1;
+  };
   host.changed = (settingsId) => {
     for (const observer of host.observers) {
       observer.update({ type: "status", payload: { status: "plugin_settings_changed", pluginId: "workspace-order", settingsId } });
@@ -237,51 +231,100 @@ function fakeHost(label, hidden = []) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const hidden = () => [...readHidden()].sort();
 
-// Each copy of the plugin brings its host's list, and the app hides them all.
-const mini = fakeHost("ragmini", ["7326-plugin-timeline-kind"]);
+// Each copy of the plugin brings its host's settings. Before any host has an order, the app shows
+// the one it kept itself.
+storage.set("workspace-order:names", JSON.stringify(["warp"]));
+const mini = fakeHost("ragmini", { hidden: ["7326-plugin-timeline-kind"] });
 const box = fakeHost("ragdevbox");
-const air = fakeHost("ragair", ["6434-claude-settings"]);
-const leave = new Map([mini, box, air].map((host) => [host, joinHiddenWorkspaces(host.client)]));
+const air = fakeHost("ragair", { hidden: ["6434-claude-settings"] });
+const leave = new Map([mini, box, air].map((host) => [host, joinWorkspaceSettings(host.client)]));
 await settle();
-assert.deepEqual(hidden(), ["6434-claude-settings", "7326-plugin-timeline-kind"]);
+assert.equal(readSyncedOrder(), null);
+assert.deepEqual(readOrder(), ["warp"]);
+assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
 
-// Hiding saves on every host. One saves in between and costs another read; one is unreachable,
-// which the error names while the others keep the change.
+// Ordered by name, the groups keep your order on every host filter, ahead of the rest, which keep
+// Paseo's order. dev is only on MINI and stays out of BOX's sidebar. The order shows at once and is
+// saved on every host, next to their hidden lists.
+const saving = saveOrder(["ragokan", "pasode", "coding"]);
+assert.deepEqual(readOrder(), ["ragokan", "pasode", "coding"]);
+await saving;
+for (const host of [mini, box, air]) assert.deepEqual(host.stored.order, ["ragokan", "pasode", "coding"]);
+assert.ok(mini.stored.orderSavedAt > 0 && mini.stored.orderSavedAt === air.stored.orderSavedAt);
+assert.deepEqual(mini.stored.hidden, ["7326-plugin-timeline-kind"]);
+for (const order of [storedOrder, []]) {
+  assert.deepEqual(names(layout({ hosts: ALL, storedOrder: order })).slice(0, 3), ["ragokan", "pasode", "coding"]);
+  assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: order })), ["ragokan", "pasode", "coding", "warp"]);
+  assert.deepEqual(names(layout({ hosts: [MINI], storedOrder: order })), ["ragokan", "coding", "dev"]);
+}
+assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["ragokan", "pasode", "coding", "dev", "warp"]);
+// Keyboard shortcuts walk the same order.
+const shortcuts = (result) => result.shortcutModel.shortcutTargets.map((target) => target.workspaceId);
+assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
+
+// Saving an order makes the sidebar lay itself out again.
+let before = orderStore.getState().pinnedWorkspaceOrder;
+await saveOrder(["warp"]);
+assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
+assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["warp", "coding", "dev", "pasode", "ragokan"]);
+
+// Hosts disagree when one missed a save: the order saved last wins, and an older one turning up does not.
+air.save({ order: ["dev", "coding"], orderSavedAt: mini.stored.orderSavedAt + 1000 });
+air.changed("workspaces");
+await settle();
+assert.deepEqual(readOrder(), ["dev", "coding"]);
+box.save({ order: ["pasode"], orderSavedAt: 1 });
+box.changed("workspaces");
+await settle();
+assert.deepEqual(readOrder(), ["dev", "coding"]);
+await saveOrder(["warp"]);
+for (const host of [mini, box, air]) assert.deepEqual(host.stored.order, ["warp"]);
+
+// iOS and Android have no localStorage; the hosts' order applies there all the same.
+delete globalThis.localStorage;
+assert.deepEqual(readOrder(), ["warp"]);
+assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
+globalThis.localStorage = globalThis.window.localStorage;
+
+// Hiding saves on every host and leaves the order alone. One host saves in between and costs
+// another read; one is unreachable, which the error names while the others keep the change.
 air.conflictOnce = true;
 box.down = true;
 await assert.rejects(setHidden("7555-markdown-table", true), /Could not save on 1 of 3 hosts: ragdevbox is unreachable/);
-assert.deepEqual(mini.stored.names, ["7326-plugin-timeline-kind", "7555-markdown-table"]);
-assert.deepEqual(air.stored.names, ["6434-claude-settings", "7555-markdown-table"]);
+assert.deepEqual(mini.stored.hidden, ["7326-plugin-timeline-kind", "7555-markdown-table"]);
+assert.deepEqual(air.stored.hidden, ["6434-claude-settings", "7555-markdown-table"]);
+assert.deepEqual(mini.stored.order, ["warp"]);
 assert.ok(readHidden().has("7555-markdown-table"));
 box.down = false;
 const writes = [mini.writes, air.writes];
 await setHidden("7555-markdown-table", true);
-assert.deepEqual(box.stored.names, ["7555-markdown-table"]);
+assert.deepEqual(box.stored.hidden, ["7555-markdown-table"]);
 assert.deepEqual([mini.writes, air.writes], writes, "hosts that already hide it are left alone");
 
 // Showing takes it off every host.
 await setHidden("7326-plugin-timeline-kind", false);
-assert.deepEqual(mini.stored.names, ["7555-markdown-table"]);
+assert.deepEqual(mini.stored.hidden, ["7555-markdown-table"]);
 assert.deepEqual(hidden(), ["6434-claude-settings", "7555-markdown-table"]);
 
 // Another app saving on a host: this app reads that host again, for this setting only.
-air.stored = { names: [...air.stored.names, "7324-codex-multi-file"] };
-air.revision += 1;
+air.save({ hidden: [...air.stored.hidden, "7324-codex-multi-file"] });
 air.changed("features");
 await settle();
 assert.ok(!readHidden().has("7324-codex-multi-file"));
-air.changed("hidden-workspaces");
+air.changed("workspaces");
 await settle();
 assert.ok(readHidden().has("7324-codex-multi-file"));
 
-// A copy that stops takes its host's list with it.
+// A copy that stops takes its host's settings with it.
 leave.get(air)();
+leave.delete(air);
 assert.ok(air.released);
 assert.deepEqual(hidden(), ["7555-markdown-table"]);
+assert.deepEqual(readOrder(), ["warp"]);
 
 // A hidden group leaves the sidebar on every host filter, with its chats, pinned ones too, and its
 // shortcuts; the order skips it. Hiding lays the sidebar out again.
-saveOrder(["ragokan", "pasode", "coding"]);
+await saveOrder(["ragokan", "pasode", "coding"]);
 before = orderStore.getState().pinnedWorkspaceOrder;
 await setHidden("pasode", true);
 assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
@@ -323,13 +366,8 @@ const zero = hideProjects(
 assert.deepEqual(zero.projects.map((p) => p.projectName), ["pasode", "coding"]);
 assert.equal(zero.workspaceEntriesByKey.size, 0);
 
-// iOS and Android: no localStorage, so no order, and nothing throws.
-delete globalThis.localStorage;
-assert.deepEqual(readOrder(), []);
-globalThis.localStorage = globalThis.window.localStorage;
-
 // A second host's copy wraps nothing new, and the patch stays until every copy unloads.
-saveOrder(["warp"]);
+await saveOrder(["warp"]);
 unpatch();
 unpatch();
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
@@ -337,5 +375,12 @@ unpatchSecondHost();
 assert.equal(projection.buildSidebarProjection, original);
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["coding", "dev", "pasode", "ragokan", "warp"]);
 assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: numbered })).slice(-2), ["3608-overlays-close-on-settings", "0-scratch"], "Paseo itself shows them");
+
+// With no host left, the app is back to the order it kept, and on iOS and Android to none.
 for (const stop of leave.values()) stop();
-console.log(`ok: sidebar layout, order store and hiding in ${bundlePath}`);
+assert.equal(readSyncedOrder(), null);
+assert.deepEqual(readOrder(), ["warp"]);
+delete globalThis.localStorage;
+assert.deepEqual(readOrder(), []);
+globalThis.localStorage = globalThis.window.localStorage;
+console.log(`ok: sidebar layout, order store, order and hiding in ${bundlePath}`);

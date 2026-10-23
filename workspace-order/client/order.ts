@@ -1,8 +1,10 @@
+import { readSyncedOrder, saveSyncedOrder, subscribe } from "./hosts";
+
 // This plugin typechecks without the DOM library. Declare only what this module uses. localStorage
 // exists on desktop and web only.
-declare const localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void } | undefined;
+declare const localStorage: { getItem(key: string): string | null } | undefined;
 
-// Paseo keeps its own sidebar order in this client's storage too, so the order lives beside it.
+// Where this app kept the order before the hosts did; it shows until an order is saved there.
 // Names, not Paseo's keys: a group's key changes with the hosts the sidebar shows, its name does not.
 const STORAGE_KEY = "workspace-order:names";
 
@@ -16,26 +18,23 @@ function parse(raw: string | null): string[] {
 }
 
 let cache: { raw: string | null; names: string[] } = { raw: null, names: [] };
-const listeners = new Set<() => void>();
 
-// Reads storage on every call, so a copy of the plugin loaded for another host sees the same
-// order; the parsed list is reused until the stored text changes.
-export function readOrder(): string[] {
-  // iOS and Android: no order, and the page that saves one is not there.
+// The parsed list is reused until the stored text changes.
+function readLocalOrder(): string[] {
   if (typeof localStorage === "undefined") return [];
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw !== cache.raw) cache = { raw, names: parse(raw) };
   return cache.names;
 }
 
-export function saveOrder(names: string[]) {
-  localStorage!.setItem(STORAGE_KEY, JSON.stringify(names));
-  for (const listener of listeners) listener();
+/** The order saved on the hosts, else the one this app kept before. */
+export function readOrder(): readonly string[] {
+  return readSyncedOrder() ?? readLocalOrder();
 }
 
-export function subscribeOrder(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+/** Saves on every host the app reaches, so every app connected to them follows it. */
+export function saveOrder(names: string[]) {
+  return saveSyncedOrder(names);
 }
+
+export const subscribeOrder = subscribe;
