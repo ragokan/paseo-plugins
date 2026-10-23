@@ -25,6 +25,9 @@ export interface GroupingInput {
 }
 export type BuildShortcuts = (input: { sections: Array<{ workspaces: Row[]; collapsed?: boolean }> }) => unknown;
 
+// Paseo's leading icon for its Working group.
+const WORKING_ICON = { kind: "status", bucket: "running" };
+
 /** What a workspace marked as done by hand is known by: it stays in Done until its status changes. */
 export const doneMark = (workspaceId: string, enteredAt: number) => `${workspaceId}@${enteredAt}`;
 
@@ -34,15 +37,17 @@ export function waitsInIdle(workspaceId: string, enteredAt: number | undefined, 
 }
 
 /**
- * In status grouping, moves the workspaces that entered Done less than a day ago, and were not marked
- * as done by hand, into an Idle group just above Done. Paseo lists Done newest first, so they leave it
- * in its order. Returns when the next of them turns Done, or null when none waits.
+ * In status grouping, moves the workspaces in Done waiting on a subagent into a Waiting group, then
+ * those that entered Done less than a day ago, and were not marked as done by hand, into an Idle
+ * group, both just above Done. Paseo lists Done newest first, so they leave it in its order. Returns
+ * when the next workspace in Idle turns Done, or null when none waits.
  */
 export function splitIdle<Result extends Projection>(
   projection: Result,
   input: GroupingInput,
   now: number,
   done: ReadonlySet<string>,
+  waiting: ReadonlySet<string>,
   buildShortcuts?: BuildShortcuts,
 ): { projection: Result; turnsDoneAt: number | null } {
   const unchanged = { projection, turnsDoneAt: null };
@@ -50,10 +55,15 @@ export function splitIdle<Result extends Projection>(
   const index = projection.workspaceGroups.findIndex((group) => group.key === "done");
   if (index < 0) return unchanged;
   const doneGroup = projection.workspaceGroups[index]!;
+  const subagents: Row[] = [];
   const idle: Row[] = [];
   const rest: Row[] = [];
   let turnsDoneAt: number | null = null;
   for (const row of doneGroup.rows) {
+    if (waiting.has(row.workspaceId)) {
+      subagents.push(row);
+      continue;
+    }
     const enteredAt = row.statusEnteredAt?.getTime();
     if (!waitsInIdle(row.workspaceId, enteredAt, now, done)) {
       rest.push(row);
@@ -62,11 +72,12 @@ export function splitIdle<Result extends Projection>(
     idle.push(row);
     turnsDoneAt = Math.min(turnsDoneAt ?? Infinity, enteredAt! + IDLE_FOR);
   }
-  if (idle.length === 0) return unchanged;
-  // Same icon as Done; Idle collapses on its own, under its own key.
+  if (subagents.length === 0 && idle.length === 0) return unchanged;
+  // Waiting has Working's icon, Idle has Done's; each collapses on its own, under its own key.
   const groups = [
     ...projection.workspaceGroups.slice(0, index),
-    { ...doneGroup, key: "idle", label: "Idle", rows: idle },
+    ...(subagents.length > 0 ? [{ ...doneGroup, key: "waiting", label: "Waiting", leading: WORKING_ICON, rows: subagents }] : []),
+    ...(idle.length > 0 ? [{ ...doneGroup, key: "idle", label: "Idle", rows: idle }] : []),
     ...(rest.length > 0 ? [{ ...doneGroup, rows: rest }] : []),
     ...projection.workspaceGroups.slice(index + 1),
   ];

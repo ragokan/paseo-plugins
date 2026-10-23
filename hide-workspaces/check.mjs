@@ -1,7 +1,8 @@
 // Runs the plugin against the installed Paseo app bundle: finds the sidebar modules through the
 // bundle's own Metro runtime, lays out a sidebar with Paseo's real buildSidebarProjection, unpatched,
-// with workspaces hidden and grouped by status with Idle, and saves the hidden workspaces and those
-// marked as done in fake hosts' settings. Re-run after Paseo updates:
+// with workspaces hidden and grouped by status with Waiting and Idle, saves the hidden workspaces
+// and those marked as done in fake hosts' settings, and follows fake hosts' agents. Re-run after
+// Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -58,6 +59,7 @@ function loadPlugin(file) {
 }
 const { findSidebarModules, hideProjects, patch } = loadPlugin("client/sidebar.ts");
 const { joinWorkspaceSettings, readDone, readHidden, setHidden } = loadPlugin("client/hosts.ts");
+const { joinAgents, readWaiting, waitingWorkspaces } = loadPlugin("client/agents.ts");
 const { addMarkAsDone } = loadPlugin("index.client.tsx");
 const { default: contributeServer } = loadPlugin("index.server.ts");
 
@@ -180,6 +182,10 @@ function fakeHost(label, stored = {}) {
     observers: [],
     released: false,
     commands: [],
+    agentEntries: [],
+    agentRequests: [],
+    agentObservers: [],
+    agentsReleased: false,
   };
   host.client = {
     async rpc(contract, input) {
@@ -202,6 +208,23 @@ function fakeHost(label, stored = {}) {
       return () => host.commands.splice(host.commands.indexOf(item), 1);
     },
     paseo: {
+      agents: {
+        async list(options) {
+          host.agentRequests.push(options);
+          return {
+            entries: host.agentEntries.map((agent) => ({ agent })),
+            pageInfo: { hasMore: false },
+            subscriptionId: "agents",
+            subscription: {
+              subscribe(observer) {
+                host.agentObservers.push(observer);
+                return () => {};
+              },
+              release: async () => void (host.agentsReleased = true),
+            },
+          };
+        },
+      },
       observeEvents(events) {
         assert.deepEqual(events, ["status.plugin_settings_changed"]);
         return {
@@ -441,6 +464,87 @@ box.save({ done: { ...box.stored.done, recent: t0 - 0.5 * HOUR } });
 box.changed("workspaces");
 await settle();
 assert.deepEqual(statusGroups(statusLayout()).slice(-1), [["done", DONE, ["recent", "fix-login", "old-docs", "never"]]]);
+
+// A workspace in Done whose agent waits on a subagent, one it started that is still working, or one
+// those started, sits in Waiting above Idle with Working's icon, whichever host the subagent is on.
+// Every copy follows its own host's agents, background ones included.
+box.save({ done: {} });
+box.changed("workspaces");
+await settle();
+const agentSnapshot = (id, workspaceId, status, parent, archivedAt = null) => ({
+  id,
+  workspaceId,
+  status,
+  labels: parent ? { "paseo.parent-agent-id": parent } : {},
+  archivedAt,
+});
+const lead = agentSnapshot("lead", "fix-login", "idle");
+box.agentEntries = [lead, agentSnapshot("worker", "worker-ws", "running", "lead"), agentSnapshot("writer", "old-docs", "idle")];
+const leaveAgents = new Map([mini, box].map((host) => [host, joinAgents(host.client)]));
+await settle();
+assert.deepEqual(box.agentRequests, [{ scope: "active", includeBackground: true, page: { limit: 200 }, subscribe: {} }]);
+assert.deepEqual([...readWaiting()], ["fix-login"]);
+result = statusLayout();
+assert.deepEqual(statusGroups(result), [
+  ["attention", "sidebar.statusBucket.readyToReview", ["review"]],
+  ["running", "sidebar.statusBucket.working", ["build"]],
+  ["waiting", "Waiting", ["fix-login"]],
+  ["idle", "Idle", ["recent"]],
+  ["done", DONE, ["old-docs", "never"]],
+]);
+assert.deepEqual(result.workspaceGroups[2].leading, result.workspaceGroups[1].leading, "Working's icon");
+assert.deepEqual(shortcuts(result), ["review", "build", "fix-login", "recent", "old-docs", "never"]);
+assert.deepEqual(shortcuts(statusLayout({ collapsed: ["waiting"] })), ["review", "build", "recent", "old-docs", "never"]);
+// Waiting outlasts Idle's day, and Mark as done leaves it alone.
+assert.deepEqual(statusGroups(statusLayout({ rows: [["fix-login", "done", 30]] })), [["waiting", "Waiting", ["fix-login"]]]);
+await assert.rejects(async () => select("fix-login", "done", 2), /This workspace is not in Idle/);
+// The subagent finishing lays the sidebar out again, and the workspace moves on to Idle.
+const agentUpdate = (host, payload) => host.agentObservers[0].update({ type: "agent_update", payload });
+before = orderStore.getState().pinnedWorkspaceOrder;
+agentUpdate(box, { kind: "upsert", agent: agentSnapshot("worker", "worker-ws", "idle", "lead") });
+assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
+assert.deepEqual(statusGroups(statusLayout()).slice(2), [["idle", "Idle", ["recent", "fix-login"]], ["done", DONE, ["old-docs", "never"]]]);
+// The subagent's own subagent, on another host, keeps it waiting; other agent updates change nothing.
+agentUpdate(mini, { kind: "upsert", agent: agentSnapshot("tester", "tester-ws", "initializing", "worker") });
+assert.deepEqual([...readWaiting()].sort(), ["fix-login", "worker-ws"]);
+before = orderStore.getState().pinnedWorkspaceOrder;
+agentUpdate(box, { kind: "upsert", agent: agentSnapshot("writer", "old-docs", "idle") });
+agentUpdate(mini, { kind: "upsert", agent: agentSnapshot("tester", "tester-ws", "running", "worker") });
+assert.equal(orderStore.getState().pinnedWorkspaceOrder, before, "no relayout while the waiting workspaces stay the same");
+// An agent that is working itself is not waiting; nor is one whose subagent is gone or archived.
+agentUpdate(box, { kind: "upsert", agent: agentSnapshot("lead", "fix-login", "running") });
+assert.deepEqual([...readWaiting()], ["worker-ws"]);
+agentUpdate(box, { kind: "upsert", agent: lead });
+agentUpdate(mini, { kind: "remove", agentId: "tester" });
+assert.deepEqual([...readWaiting()], []);
+agentUpdate(box, { kind: "upsert", agent: agentSnapshot("worker", "worker-ws", "running", "lead", "2026-10-23T12:00:00Z") });
+assert.deepEqual([...readWaiting()], []);
+// A reconnect brings the host's agents again.
+box.agentObservers[0].snapshot({ subscriptionId: "agents", entries: [{ agent: lead }, { agent: agentSnapshot("worker", "worker-ws", "running", "lead") }] });
+assert.deepEqual([...readWaiting()], ["fix-login"]);
+// Agents that name each other are not waiting on anything.
+assert.deepEqual(
+  [...waitingWorkspaces(new Map([["a", { workspaceId: "wa", parentId: "b", working: false }], ["b", { workspaceId: "wb", parentId: "a", working: false }]]))],
+  [],
+);
+// A copy that stops takes its host's agents with it, and releases the daemon's subscription, also
+// when it stops before the list arrives. An app without the agent list only warns.
+leaveAgents.get(box)();
+assert.ok(box.agentsReleased);
+assert.deepEqual([...readWaiting()], []);
+leaveAgents.get(mini)();
+const late = fakeHost("late");
+joinAgents(late.client)();
+await settle();
+assert.ok(late.agentsReleased);
+const warnings = [];
+const warn = console.warn;
+console.warn = (...args) => warnings.push(args.join(" "));
+joinAgents({ paseo: {} })();
+await settle();
+console.warn = warn;
+assert.match(warnings.join("\n"), /cannot follow this host's agents/);
+
 for (const remove of removeMarkAsDone.values()) remove();
 assert.deepEqual(box.commands, []);
 
@@ -463,4 +567,4 @@ assert.deepEqual(names(layout({ hosts: [BOX], extra: numbered })).slice(-2), ["3
 // With no host left, nothing is hidden.
 for (const stop of leave.values()) stop();
 assert.deepEqual(hidden(), []);
-console.log(`ok: sidebar layout, order store, hiding and Idle in ${bundlePath}`);
+console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle in ${bundlePath}`);

@@ -4,7 +4,7 @@ import { joinAppFeatures, whileAppFeature } from "./client/app-features";
 import { FeatureSettings } from "./client/settings";
 import { createSwitches, type Contribution } from "./client/switches";
 import { joinWorkspaceSettings } from "./client/plugins/hide-workspaces/hosts";
-import { addMarkAsDone, contributeSidebar as hideWorkspaces } from "./client/plugins/hide-workspaces/index";
+import { contributeEveryCopy, contributeSidebar as hideWorkspaces } from "./client/plugins/hide-workspaces/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
 import mcpToggle from "./client/plugins/mcp-toggle/index";
@@ -29,8 +29,9 @@ const hostSettings = hostFeatureSettings(false);
 export default function contribute(client: PluginClientContext) {
   // Every copy brings its host's hidden workspaces and those marked as done, whichever copy runs hide-workspaces' sidebar patch.
   const leaveWorkspaces = joinWorkspaceSettings(client);
-  // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Mark as done.
-  const removeMarkAsDone = whileAppFeature("hide-workspaces", () => addMarkAsDone(client));
+  // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Mark as
+  // done, and follows its own host's agents for Waiting.
+  const stopHideWorkspaces = whileAppFeature("hide-workspaces", () => contributeEveryCopy(client));
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -53,7 +54,7 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
-    removeMarkAsDone();
+    stopHideWorkspaces();
     leaveWorkspaces();
   };
 }

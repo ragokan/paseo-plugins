@@ -1,3 +1,4 @@
+import { readWaiting, subscribeWaiting } from "./agents";
 import { alwaysHidden, readDone, readHidden, subscribe } from "./hosts";
 import { splitIdle, type BuildShortcuts, type GroupingInput, type Projection } from "./idle";
 
@@ -57,7 +58,7 @@ export function hideProjects<Input extends ProjectionInput>(input: Input, names:
 // shortcut: the plugin SDK has no sidebar API, so this finds the app's own modules among those
 // Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its keyboard
 // shortcuts, the sidebar order store, nudged so the sidebar lays itself out again, and
-// buildSidebarShortcutSections, which numbers the shortcuts again once Idle is split off.
+// buildSidebarShortcutSections, which numbers the shortcuts again once Waiting and Idle are split off.
 // Breaks if Paseo renames either or Metro stops keeping modules in a Map; switch to an SDK call
 // once one exists.
 export function findSidebarModules(): SidebarModules {
@@ -118,7 +119,7 @@ export function patch({ projection, orderStore, buildShortcuts }: SidebarModules
     const layout = (input: ProjectionInput & GroupingInput) => {
       const now = Date.now();
       const result = original(hideProjects(input, readHidden()));
-      const { projection: split, turnsDoneAt } = splitIdle(result, input, now, readDone(), buildShortcuts);
+      const { projection: split, turnsDoneAt } = splitIdle(result, input, now, readDone(), readWaiting(), buildShortcuts);
       clearTimeout(timer);
       // A timer can fire a little early; the second's margin keeps it from finding the row still in Idle.
       timer = turnsDoneAt === null ? undefined : setTimeout(() => relayout(orderStore), turnsDoneAt - now + 1000);
@@ -129,12 +130,14 @@ export function patch({ projection, orderStore, buildShortcuts }: SidebarModules
   }
   wrapper.loads! += 1;
   const unsubscribe = subscribe(() => relayout(orderStore));
+  const unsubscribeWaiting = subscribeWaiting(() => relayout(orderStore));
   relayout(orderStore);
   let unloaded = false;
   return () => {
     if (unloaded) return;
     unloaded = true;
     unsubscribe();
+    unsubscribeWaiting();
     wrapper.loads! -= 1;
     if (wrapper.loads === 0) {
       wrapper.stop?.();

@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { Platform } from "react-native";
+import { joinAgents, readWaiting } from "./client/agents";
 import { joinWorkspaceSettings, markDone, readDone } from "./client/hosts";
 import { waitsInIdle } from "./client/idle";
 import { HideWorkspacesSettings } from "./client/screen";
@@ -48,7 +49,8 @@ export function addMarkAsDone(client: PluginClientContext) {
     onSelect: ({ workspace }) => {
       const enteredAt = workspace.statusEnteredAt === null ? undefined : Date.parse(workspace.statusEnteredAt);
       // Paseo shows the error in a toast.
-      if (workspace.status !== "done" || !waitsInIdle(workspace.id, enteredAt, Date.now(), readDone())) {
+      const inIdle = waitsInIdle(workspace.id, enteredAt, Date.now(), readDone()) && !readWaiting().has(workspace.id);
+      if (workspace.status !== "done" || !inIdle) {
         throw new Error("This workspace is not in Idle");
       }
       return markDone(client, workspace.id, enteredAt!);
@@ -56,13 +58,26 @@ export function addMarkAsDone(client: PluginClientContext) {
   });
 }
 
+/**
+ * What every copy adds for its own host, whichever copy runs the sidebar patch: Mark as done, and the
+ * host's agents, for Waiting.
+ */
+export function contributeEveryCopy(client: PluginClientContext) {
+  const removeMarkAsDone = addMarkAsDone(client);
+  const leaveAgents = joinAgents(client);
+  return () => {
+    leaveAgents();
+    removeMarkAsDone();
+  };
+}
+
 export default function contribute(client: PluginClientContext) {
   const leaveHosts = joinWorkspaceSettings(client);
-  const removeMarkAsDone = addMarkAsDone(client);
+  const stopEveryCopy = contributeEveryCopy(client);
   const stopSidebar = contributeSidebar(client);
   return () => {
     stopSidebar();
-    removeMarkAsDone();
+    stopEveryCopy();
     leaveHosts();
   };
 }
