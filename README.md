@@ -5,6 +5,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | Plugin | What it does |
 |---|---|
 | [host-filter](host-filter) | Pick which host the sidebar shows, from the top of the sidebar. |
+| [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
 | [merge-projects](merge-projects) | Show same-named projects from different hosts as one sidebar project. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |

@@ -1,0 +1,8 @@
+{
+  "id": "mark-all-read",
+  "name": "Mark all as read",
+  "description": "A command palette action that marks every agent on every host as read",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}
