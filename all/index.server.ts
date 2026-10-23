@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { gate } from "./server/gate";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
+import workspaceOrder from "./server/plugins/workspace-order/index";
 import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 
 export default function contribute(server: PluginServerContext) {
@@ -18,6 +19,8 @@ export default function contribute(server: PluginServerContext) {
   const cleanups = [
     mcpToggle(gate(server, "mcp-toggle", () => features["mcp-toggle"])),
     machineStatus(gate(server, "machine-status", () => features["machine-status"])),
+    // Only keeps the hidden workspaces in this host's settings; its switch is in the app.
+    workspaceOrder(server),
   ];
 
   return async () => {

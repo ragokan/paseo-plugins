@@ -11,7 +11,7 @@ export const FEATURES = [
   { id: "merge-projects", scope: "app", title: "Merge projects by name", hint: "Shows same-named projects from different hosts as one sidebar project" },
   { id: "merge-thinking", scope: "app", title: "Merge thinking into tool groups", hint: "Folds thinking rows between tool calls into the collapsed tool call group" },
   { id: "themes", scope: "app", title: "Monokai themes", hint: "Monokai Pro filters as Paseo app themes" },
-  { id: "workspace-order", scope: "app", title: "Workspace order", hint: "Keep the sidebar's workspaces in your order, whichever hosts it shows" },
+  { id: "workspace-order", scope: "app", title: "Workspace order", hint: "Keep the sidebar's workspaces in your order, whichever hosts it shows, and hide the ones you pick" },
   {
     id: "mcp-toggle",
     scope: "host",

@@ -1,12 +1,10 @@
+import { readHidden, subscribeHidden } from "./hidden";
 import { readOrder, subscribeOrder } from "./order";
 
-// This plugin typechecks without the DOM library. Declare only what this module uses.
-declare const document: { scripts: ArrayLike<{ src: string }> };
-declare function fetch(url: string): Promise<{ text(): Promise<string> }>;
-
-// The field of Paseo's SidebarProjectionInput this plugin rewrites.
+// The fields of Paseo's SidebarProjectionInput this plugin reads or rewrites.
 export interface ProjectionInput {
-  projects: Array<{ projectName: string }>;
+  projects: Array<{ projectName: string; viewKey: string }>;
+  workspaceEntriesByKey: Map<string, { projectViewKey?: string; projectName?: string }>;
 }
 
 type BuildProjection = ((input: ProjectionInput) => unknown) & { original?: BuildProjection; loads?: number };
@@ -20,6 +18,11 @@ interface OrderStore {
 export interface SidebarModules {
   projection: ProjectionModule;
   orderStore: OrderStore;
+}
+// An entry in Metro's module registry.
+interface MetroModule {
+  isInitialized?: boolean;
+  publicModule?: { exports?: Record<string, unknown> };
 }
 
 /**
@@ -36,29 +39,65 @@ export function orderProjects<Input extends ProjectionInput>(input: Input, names
   return { ...input, projects: [...ordered, ...input.projects.filter((project) => !rank.has(project.projectName))] };
 }
 
-// shortcut: the plugin SDK has no sidebar order API, so this finds the app's own modules in its
-// Metro bundle: buildSidebarProjection, which lays out the sidebar's groups and its keyboard
-// shortcuts, and the sidebar order store, nudged so the sidebar lays itself out again.
-// Desktop/web only, and breaks if Paseo renames either; switch to an SDK call once one exists.
-export async function findSidebarModules(): Promise<SidebarModules> {
-  const bundle = Array.from(document.scripts).find((script) => script.src.includes("/_expo/static/js/"));
-  if (!bundle) throw new Error("Paseo app bundle not found");
-  const source = await (await fetch(bundle.src)).text();
-  const metroRequire = (globalThis as { __r?: (id: number) => Record<string, unknown> }).__r;
-  const moduleWith = (marker: string) => {
-    const start = source.indexOf(marker);
-    const end = source.indexOf("\n", start);
-    // Each Metro module is one line ending in `},<moduleId>,[<deps>]);`.
-    const moduleId = start < 0 ? undefined : /,(\d+),\[[\d,]*\]\);$/.exec(source.slice(start, end < 0 ? undefined : end))?.[1];
-    return moduleId && metroRequire ? metroRequire(Number(moduleId)) : undefined;
+/**
+ * Leaves the named groups out of the sidebar with their chats, pinned ones included: Paseo takes
+ * pinned chats from the groups it is given. In status grouping the chats come from the workspace
+ * entries, so those go too.
+ */
+export function hideProjects<Input extends ProjectionInput>(input: Input, names: ReadonlySet<string>): Input {
+  if (names.size === 0) return input;
+  const hidden = new Set(input.projects.filter((project) => names.has(project.projectName)).map((project) => project.viewKey));
+  if (hidden.size === 0) return input;
+  const shown = (entry: { projectViewKey?: string; projectName?: string }) =>
+    !(entry.projectViewKey && hidden.has(entry.projectViewKey)) && !(entry.projectName && names.has(entry.projectName));
+  const entries = [...input.workspaceEntriesByKey].filter(([, entry]) => shown(entry));
+  return {
+    ...input,
+    projects: input.projects.filter((project) => !hidden.has(project.viewKey)),
+    workspaceEntriesByKey: new Map(entries),
   };
-  const projection = moduleWith(".buildSidebarProjection=function") as Partial<ProjectionModule> | undefined;
-  const orderStore = moduleWith('"useSidebarOrderStore",{enumerable')?.useSidebarOrderStore as Partial<OrderStore> | undefined;
-  if (typeof projection?.buildSidebarProjection !== "function") throw new Error("Paseo sidebar layout not found");
-  if (typeof orderStore?.setState !== "function" || !Array.isArray(orderStore.getState?.().pinnedWorkspaceOrder)) {
-    throw new Error("Paseo sidebar order not found");
+}
+
+// shortcut: the plugin SDK has no sidebar order API, so this finds the app's own modules among
+// those Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its
+// keyboard shortcuts, and the sidebar order store, nudged so the sidebar lays itself out again.
+// Breaks if Paseo renames either or Metro stops keeping modules in a Map; switch to an SDK call
+// once one exists.
+export function findSidebarModules(): SidebarModules {
+  const metroRequire = (globalThis as { __r?: (id: unknown) => unknown }).__r;
+  if (typeof metroRequire !== "function") throw new Error("Metro runtime not found");
+  // Metro's require starts with modules.get(id), so asking for an id no module has hands over the
+  // registry Map. The probe answers as an already loaded module, so Metro runs no module code and
+  // takes no error path, which would be fatal in a release build on iOS and Android.
+  const probe = Symbol("workspace-order");
+  const get = Map.prototype.get;
+  let modules: Map<unknown, MetroModule> | undefined;
+  Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+    if (key !== probe) return get.call(this, key);
+    modules = this as Map<unknown, MetroModule>;
+    return { isInitialized: true, publicModule: { exports: undefined } };
+  };
+  try {
+    metroRequire(probe);
+  } finally {
+    Map.prototype.get = get;
   }
-  return { projection: projection as ProjectionModule, orderStore: orderStore as OrderStore };
+  if (!modules) throw new Error("Metro module registry not found");
+  let projection: ProjectionModule | undefined;
+  let orderStore: OrderStore | undefined;
+  // Only modules that have already run: requiring another one would run its code early.
+  for (const module of modules.values()) {
+    const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
+    if (!exports) continue;
+    if (typeof exports.buildSidebarProjection === "function") projection = exports as unknown as ProjectionModule;
+    const store = exports.useSidebarOrderStore as Partial<OrderStore> | undefined;
+    if (typeof store?.setState === "function" && Array.isArray(store.getState?.().pinnedWorkspaceOrder)) {
+      orderStore = store as OrderStore;
+    }
+  }
+  if (!projection) throw new Error("Paseo sidebar layout not found");
+  if (!orderStore) throw new Error("Paseo sidebar order not found");
+  return { projection, orderStore };
 }
 
 // The sidebar recomputes its layout only when its inputs change; a fresh copy of the saved
@@ -73,17 +112,20 @@ export function patch({ projection, orderStore }: SidebarModules): () => void {
   let wrapper = projection.buildSidebarProjection;
   if (!wrapper.original) {
     const original = wrapper;
-    wrapper = Object.assign((input: ProjectionInput) => original(orderProjects(input, readOrder())), { original, loads: 0 });
+    const layout = (input: ProjectionInput) => original(orderProjects(hideProjects(input, readHidden()), readOrder()));
+    wrapper = Object.assign(layout, { original, loads: 0 });
     projection.buildSidebarProjection = wrapper;
   }
   wrapper.loads! += 1;
-  const unsubscribe = subscribeOrder(() => relayout(orderStore));
+  const unsubscribeOrder = subscribeOrder(() => relayout(orderStore));
+  const unsubscribeHidden = subscribeHidden(() => relayout(orderStore));
   relayout(orderStore);
   let unloaded = false;
   return () => {
     if (unloaded) return;
     unloaded = true;
-    unsubscribe();
+    unsubscribeOrder();
+    unsubscribeHidden();
     wrapper.loads! -= 1;
     if (wrapper.loads === 0) projection.buildSidebarProjection = wrapper.original!;
     relayout(orderStore);

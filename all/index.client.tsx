@@ -10,7 +10,8 @@ import mcpToggle from "./client/plugins/mcp-toggle/index";
 import mergeProjects from "./client/plugins/merge-projects/index";
 import mergeThinking from "./client/plugins/merge-thinking/index";
 import themes from "./client/plugins/themes/index";
-import workspaceOrder from "./client/plugins/workspace-order/index";
+import { joinHiddenWorkspaces } from "./client/plugins/workspace-order/hidden";
+import { contributeSidebar as workspaceOrder } from "./client/plugins/workspace-order/index";
 import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type HostFeatureId } from "./shared/features";
 
 declare const console: { warn(...args: unknown[]): void };
@@ -30,6 +31,8 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
 const hostSettings = hostFeatureSettings(false);
 
 export default function contribute(client: PluginClientContext) {
+  // Every copy brings its host's hidden workspaces, whichever copy runs workspace-order's sidebar patch.
+  const leaveHidden = joinHiddenWorkspaces(client);
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -52,5 +55,6 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
+    leaveHidden();
   };
 }

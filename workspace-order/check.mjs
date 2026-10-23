@@ -1,10 +1,17 @@
-// Runs the plugin against the installed Paseo app bundle: finds the sidebar modules, then lays out
-// a sidebar with Paseo's real buildSidebarProjection, unpatched and patched. Re-run after Paseo updates:
+// Runs the plugin against the installed Paseo app bundle: finds the sidebar modules through the
+// bundle's own Metro runtime, lays out a sidebar with Paseo's real buildSidebarProjection, unpatched,
+// ordered and with workspaces hidden, and hides workspaces through fake hosts' settings. Re-run after
+// Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
+const root = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const bundleDir = "/Applications/Paseo.app/Contents/Resources/app-dist/_expo/static/js/web/";
 // The app bundle is the largest index-*.js; the others are small async chunks.
 const bundlePath =
@@ -24,67 +31,80 @@ globalThis.localStorage = {
 };
 globalThis.window = { localStorage: globalThis.localStorage };
 
-// Plugin modules, compiled the way the app loads them.
+// Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
 const pluginModules = new Map();
-function loadPlugin(name) {
-  if (!pluginModules.has(name)) {
-    const { outputText } = ts.transpileModule(readFileSync(new URL(`client/${name}.ts`, import.meta.url), "utf8"), {
+function loadPlugin(file) {
+  if (!pluginModules.has(file)) {
+    const { outputText } = ts.transpileModule(readFileSync(path.join(root, file), "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     });
     const module = { exports: {} };
-    pluginModules.set(name, module);
-    new Function("require", "module", "exports", outputText)((id) => loadPlugin(id.replace("./", "")), module, module.exports);
+    pluginModules.set(file, module);
+    const localRequire = (specifier) => {
+      if (!specifier.startsWith(".")) return require(specifier);
+      const base = path.join(path.dirname(file), specifier);
+      return loadPlugin([".ts", ".tsx"].map((extension) => base + extension).find((candidate) => existsSync(path.join(root, candidate))));
+    };
+    new Function("require", "module", "exports", outputText)(localRequire, module, module.exports);
   }
-  return pluginModules.get(name).exports;
+  return pluginModules.get(file).exports;
 }
-const { saveOrder } = loadPlugin("order");
-const { findSidebarModules, patch } = loadPlugin("sidebar");
+const { readOrder, saveOrder } = loadPlugin("client/order.ts");
+const { findSidebarModules, hideProjects, patch } = loadPlugin("client/sidebar.ts");
+const { joinHiddenWorkspaces, readHidden, setHidden } = loadPlugin("client/hidden.ts");
+const { default: contributeServer } = loadPlugin("index.server.ts");
 
-// Minimal Metro runtime over the bundle's own modules, so the check runs Paseo's real code. A module
-// is one line, except a few vendored ones that span several until `},<id>,[<deps>]);`.
-const lines = new Map();
+assert.throws(findSidebarModules, /Metro runtime not found/);
+
+// The bundle's own Metro runtime (the same one the iOS and Android builds use), with an ErrorUtils
+// like React Native's, whose fatal report crashes a release build.
+const lines = bundle.split("\n");
+const mapGet = Map.prototype.get;
+const fatal = [];
+globalThis.ErrorUtils = { reportFatalError: (error) => fatal.push(error) };
+globalThis.__METRO_GLOBAL_PREFIX__ = "";
+(0, eval)(lines.find((line) => line.includes("Requiring unknown module")));
+const metroDefine = globalThis.__d;
+const metroRequire = globalThis.__r;
+
+// Defines every module, counting which module factories run. A module is one line, except a few
+// vendored ones that span several until `},<id>,[<deps>]);`.
+const moduleTexts = new Map();
 let pending = null;
-for (const line of bundle.split("\n")) {
+for (const line of lines) {
   if (pending === null && !line.startsWith("__d(")) continue;
   pending = pending === null ? line : `${pending}\n${line}`;
   const match = /\},(\d+),\[[\d,]*\]\);$/.exec(line);
   if (match) {
-    lines.set(Number(match[1]), pending);
+    moduleTexts.set(Number(match[1]), pending);
     pending = null;
   }
 }
-const modules = new Map();
-function metroRequire(id) {
-  if (!modules.has(id)) {
-    let definition;
-    new Function("__d", lines.get(id))((factory, _id, deps) => (definition = { factory, deps }));
-    const module = { exports: {} };
-    modules.set(id, module);
-    definition.factory(globalThis, metroRequire, metroRequire, metroRequire, module, module.exports, definition.deps);
-  }
-  return modules.get(id).exports;
-}
-metroRequire.importDefault = (id) => metroRequire(id).default;
-metroRequire.importAll = metroRequire;
-const moduleWith = (marker) => {
-  const start = bundle.indexOf(marker);
-  return metroRequire(Number(/,(\d+),\[[\d,]*\]\);$/.exec(bundle.slice(start, bundle.indexOf("\n", start)))[1]));
-};
+const ran = new Set();
+globalThis.__d = (factory, id, deps) =>
+  metroDefine(function (...args) {
+    ran.add(id);
+    return factory.apply(this, args);
+  }, id, deps);
+for (const text of moduleTexts.values()) (0, eval)(text);
+const idOf = (marker) => [...moduleTexts].find(([, text]) => text.includes(marker))[0];
 
-async function lookup(source) {
-  const requestedIds = [];
-  globalThis.document = { scripts: [{ src: "app://other.js" }, { src: "app:///_expo/static/js/web/index.js" }] };
-  globalThis.fetch = async () => ({ text: async () => source });
-  globalThis.__r = (id) => (requestedIds.push(id), metroRequire(id));
-  return { found: await findSidebarModules(), requestedIds };
-}
+// Not loaded yet: the lookup finds nothing and loads nothing.
+assert.throws(findSidebarModules, /sidebar layout not found/);
+assert.equal(ran.size, 0);
 
-const { found, requestedIds } = await lookup(bundle);
-assert.match(lines.get(requestedIds[0]), /\.buildSidebarProjection=function/);
-assert.match(lines.get(requestedIds[1]), /"useSidebarOrderStore",\{enumerable/);
-await assert.rejects(lookup("__d(function(){},1,[]);"), /sidebar layout not found/);
-const { projection, orderStore } = found;
-const { applyStoredOrdering } = moduleWith(".applyStoredOrdering=function");
+// What the app has loaded by the time the plugin starts.
+const projection = metroRequire(idOf(".buildSidebarProjection=function"));
+const { useSidebarOrderStore } = metroRequire(idOf('"useSidebarOrderStore",{enumerable'));
+const { applyStoredOrdering } = metroRequire(idOf(".applyStoredOrdering=function"));
+const ranByApp = new Set(ran);
+const found = findSidebarModules();
+assert.equal(found.projection, projection);
+assert.equal(found.orderStore, useSidebarOrderStore);
+assert.deepEqual(ran, ranByApp, "the lookup ran no module code");
+assert.deepEqual(fatal, []);
+assert.equal(Map.prototype.get, mapGet);
+const { orderStore } = found;
 
 // Two hosts. Paseo keys a sidebar group by view key, and merge-projects gives a group on both hosts
 // the key `merged:<name>` only while both are shown; with the host filter on one host it is that
@@ -120,11 +140,11 @@ const groupsFor = (hosts) => {
   ];
 };
 // What the sidebar shows: Paseo applies its saved group order, then lays the sidebar out.
-const layout = ({ hosts, storedOrder }) => {
+const layout = ({ hosts, storedOrder, pinned = [] }) => {
   const projects = applyStoredOrdering({ items: groupsFor(hosts), storedOrder, getKey: (p) => p.viewKey });
   return projection.buildSidebarProjection({
     projects,
-    pinnedKeys: { pinnedWorkspaceKeys: [], pinnedAtByKey: {} },
+    pinnedKeys: { pinnedWorkspaceKeys: pinned, pinnedAtByKey: Object.fromEntries(pinned.map((key) => [key, "2026-10-23"])) },
     pinnedWorkspaceOrder: [],
     workspaceEntriesByKey: new Map(),
     projectNamesByViewKey: new Map(projects.map((p) => [p.viewKey, p.projectName])),
@@ -160,22 +180,146 @@ for (const order of [storedOrder, []]) {
 }
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["ragokan", "pasode", "coding", "dev", "warp"]);
 // Keyboard shortcuts walk the same order.
-assert.deepEqual(
-  layout({ hosts: [BOX], storedOrder: [] }).shortcutModel.shortcutTargets.map((target) => target.workspaceId),
-  ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"],
-);
+const shortcuts = (result) => result.shortcutModel.shortcutTargets.map((target) => target.workspaceId);
+assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
 
 // Saving an order makes the sidebar lay itself out again.
-const before = orderStore.getState().pinnedWorkspaceOrder;
+let before = orderStore.getState().pinnedWorkspaceOrder;
 saveOrder(["warp"]);
 assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["warp", "coding", "dev", "pasode", "ragokan"]);
 
-// A second host's copy wraps nothing new, and the order stays until every copy unloads.
+// Hidden workspaces live in each host's settings, read and written through Paseo's settings RPC.
+const server = [];
+contributeServer({ registerSettings: (definition) => server.push(definition) });
+assert.deepEqual(server.map((definition) => definition.id), ["hidden-workspaces"]);
+assert.deepEqual(server[0].schema.parse({}), { names: [] });
+
+function fakeHost(label, hidden = []) {
+  const host = { stored: { names: hidden }, revision: 1, writes: 0, down: false, conflictOnce: false, observers: [], released: false };
+  host.client = {
+    async rpc(contract, input) {
+      if (host.down) throw new Error(`${label} is unreachable`);
+      if (contract.name === "settings.hidden-workspaces.read") return { status: "ready", revision: String(host.revision), values: host.stored };
+      assert.equal(contract.name, "settings.hidden-workspaces.write");
+      if (host.conflictOnce) {
+        // Another app saved first.
+        host.conflictOnce = false;
+        host.revision += 1;
+      }
+      if (input.revision !== String(host.revision)) return { status: "conflict", error: "stale revision" };
+      host.stored = input.values;
+      host.revision += 1;
+      host.writes += 1;
+      return { status: "saved", revision: String(host.revision), values: host.stored };
+    },
+    paseo: {
+      observeEvents(events) {
+        assert.deepEqual(events, ["status.plugin_settings_changed"]);
+        return {
+          subscribe(observer) {
+            host.observers.push(observer);
+            queueMicrotask(() => observer.snapshot({ subscriptionId: "sub" }));
+            return () => {};
+          },
+          release: async () => void (host.released = true),
+        };
+      },
+    },
+  };
+  host.changed = (settingsId) => {
+    for (const observer of host.observers) {
+      observer.update({ type: "status", payload: { status: "plugin_settings_changed", pluginId: "workspace-order", settingsId } });
+    }
+  };
+  return host;
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const hidden = () => [...readHidden()].sort();
+
+// Each copy of the plugin brings its host's list, and the app hides them all.
+const mini = fakeHost("ragmini", ["7326-plugin-timeline-kind"]);
+const box = fakeHost("ragdevbox");
+const air = fakeHost("ragair", ["6434-claude-settings"]);
+const leave = new Map([mini, box, air].map((host) => [host, joinHiddenWorkspaces(host.client)]));
+await settle();
+assert.deepEqual(hidden(), ["6434-claude-settings", "7326-plugin-timeline-kind"]);
+
+// Hiding saves on every host. One saves in between and costs another read; one is unreachable,
+// which the error names while the others keep the change.
+air.conflictOnce = true;
+box.down = true;
+await assert.rejects(setHidden("7555-markdown-table", true), /Could not save on 1 of 3 hosts: ragdevbox is unreachable/);
+assert.deepEqual(mini.stored.names, ["7326-plugin-timeline-kind", "7555-markdown-table"]);
+assert.deepEqual(air.stored.names, ["6434-claude-settings", "7555-markdown-table"]);
+assert.ok(readHidden().has("7555-markdown-table"));
+box.down = false;
+const writes = [mini.writes, air.writes];
+await setHidden("7555-markdown-table", true);
+assert.deepEqual(box.stored.names, ["7555-markdown-table"]);
+assert.deepEqual([mini.writes, air.writes], writes, "hosts that already hide it are left alone");
+
+// Showing takes it off every host.
+await setHidden("7326-plugin-timeline-kind", false);
+assert.deepEqual(mini.stored.names, ["7555-markdown-table"]);
+assert.deepEqual(hidden(), ["6434-claude-settings", "7555-markdown-table"]);
+
+// Another app saving on a host: this app reads that host again, for this setting only.
+air.stored = { names: [...air.stored.names, "7324-codex-multi-file"] };
+air.revision += 1;
+air.changed("features");
+await settle();
+assert.ok(!readHidden().has("7324-codex-multi-file"));
+air.changed("hidden-workspaces");
+await settle();
+assert.ok(readHidden().has("7324-codex-multi-file"));
+
+// A copy that stops takes its host's list with it.
+leave.get(air)();
+assert.ok(air.released);
+assert.deepEqual(hidden(), ["7555-markdown-table"]);
+
+// A hidden group leaves the sidebar on every host filter, with its chats, pinned ones too, and its
+// shortcuts; the order skips it. Hiding lays the sidebar out again.
+saveOrder(["ragokan", "pasode", "coding"]);
+before = orderStore.getState().pinnedWorkspaceOrder;
+await setHidden("pasode", true);
+assert.notEqual(orderStore.getState().pinnedWorkspaceOrder, before);
+assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["ragokan", "coding", "dev", "warp"]);
+assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: storedOrder })), ["ragokan", "coding", "warp"]);
+assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan-chat", "coding-chat", "warp-chat"]);
+const pinned = layout({ hosts: [BOX], storedOrder: [], pinned: [`${BOX}:pasode-chat`, `${BOX}:warp-chat`] }).pinnedGroups.pinnedChats;
+assert.deepEqual(pinned.map((chat) => chat.workspaceId), ["warp-chat"]);
+await setHidden("pasode", false);
+assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan", "pasode", "coding", "warp"]);
+
+// Status grouping takes chats from the workspace entries; a hidden group's go, by key or by name.
+const entries = new Map([
+  ["a", { projectViewKey: "k-pasode", projectName: "pasode" }],
+  ["b", { projectViewKey: "k-coding", projectName: "coding" }],
+  ["c", { projectViewKey: "prj_old", projectName: "pasode" }],
+]);
+const projects = [
+  { projectName: "pasode", viewKey: "k-pasode" },
+  { projectName: "coding", viewKey: "k-coding" },
+];
+const statusInput = hideProjects({ projects, workspaceEntriesByKey: entries }, new Set(["pasode"]));
+assert.deepEqual(statusInput.projects.map((p) => p.projectName), ["coding"]);
+assert.deepEqual([...statusInput.workspaceEntriesByKey.keys()], ["b"]);
+assert.equal(hideProjects({ projects, workspaceEntriesByKey: entries }, new Set(["dev"])).projects, projects);
+
+// iOS and Android: no localStorage, so no order, and nothing throws.
+delete globalThis.localStorage;
+assert.deepEqual(readOrder(), []);
+globalThis.localStorage = globalThis.window.localStorage;
+
+// A second host's copy wraps nothing new, and the patch stays until every copy unloads.
+saveOrder(["warp"]);
 unpatch();
 unpatch();
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
 unpatchSecondHost();
 assert.equal(projection.buildSidebarProjection, original);
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["coding", "dev", "pasode", "ragokan", "warp"]);
-console.log(`ok: sidebar layout is module ${requestedIds[0]}, order store module ${requestedIds[1]} in ${bundlePath}`);
+for (const stop of leave.values()) stop();
+console.log(`ok: sidebar layout, order store and hiding in ${bundlePath}`);

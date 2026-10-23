@@ -6,6 +6,7 @@ import { SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getp
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { readHidden, setHidden, subscribeHidden } from "./hidden";
 import { readOrder, saveOrder, subscribeOrder } from "./order";
 
 type Theme = PluginSurfaceProps["theme"];
@@ -38,12 +39,15 @@ function useHostListings(hosts: readonly PluginHostSummary[]) {
   });
 }
 
-/** The ordered names on top, every other group of every host below them. */
+/** The ordered names on top, every other group of every host below them, then the hidden ones. */
 export function WorkspaceOrder({ theme }: { theme: Theme }) {
   const order = useSyncExternalStore(subscribeOrder, readOrder);
+  const hidden = useSyncExternalStore(subscribeHidden, readHidden);
   const hosts = useHosts();
   const listing = useHostListings(hosts);
   const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const hostName = (serverId: string) => hosts.find((host) => host.serverId === serverId)?.label.trim() || serverId;
   // Groups with the same name on several hosts are one sidebar row (merge-projects), so one row here.
@@ -55,7 +59,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
   const ordered = new Set(order);
   const needle = query.trim().toLowerCase();
   const rest = [...hostsByName.keys()]
-    .filter((name) => !ordered.has(name))
+    .filter((name) => !ordered.has(name) && !hidden.has(name))
     .filter((name) => !needle || `${name} ${hostsByName.get(name)!.join(" ")}`.toLowerCase().includes(needle))
     .sort((a, b) => a.localeCompare(b));
 
@@ -67,6 +71,22 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
   };
   const remove = (index: number) => saveOrder(order.filter((_, i) => i !== index));
   const add = (name: string) => saveOrder([...order, name]);
+  // A hidden workspace leaves the order too; shown again, it is back with the unordered ones.
+  const toggleHidden = async (name: string, hide: boolean) => {
+    setSaving(name);
+    setSaveError(null);
+    try {
+      await setHidden(name, hide);
+    } catch (error) {
+      setSaveError(message(error));
+    } finally {
+      if (hide && readHidden().has(name)) saveOrder(readOrder().filter((other) => other !== name));
+      setSaving(null);
+    }
+  };
+  const hideButton = (name: string) => (
+    <IconButton theme={theme} icon="EyeOff" label="Hide from sidebar" busy={saving === name} onPress={() => void toggleHidden(name, true)} />
+  );
 
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
   const failures = (listing.data ?? []).flatMap((host) => ("error" in host ? [host] : []));
@@ -93,6 +113,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
                     onPress={() => move(index, 1)}
                   />
                   <IconButton theme={theme} icon="X" label="Remove from order" onPress={() => remove(index)} />
+                  {hideButton(name)}
                 </View>
               </SettingsRow>
             ))
@@ -120,11 +141,14 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
           {listing.isPending ? (
             <SettingsRow label="Loading workspaces…" />
           ) : rest.length === 0 ? (
-            <SettingsRow label={needle ? "No workspace matches" : "Every workspace is ordered"} />
+            <SettingsRow label={needle ? "No workspace matches" : "Every workspace is ordered or hidden"} />
           ) : (
             rest.map((name) => (
               <SettingsRow key={name} label={name} hint={hostsByName.get(name)!.join(", ")}>
-                <IconButton theme={theme} icon="Plus" label="Add to order" onPress={() => add(name)} />
+                <View style={{ flexDirection: "row", gap: 2 }}>
+                  <IconButton theme={theme} icon="Plus" label="Add to order" onPress={() => add(name)} />
+                  {hideButton(name)}
+                </View>
               </SettingsRow>
             ))
           )}
@@ -137,6 +161,33 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
         {offline.length > 0 && (
           <Text style={muted}>Not listed while offline: {offline.map((host) => hostName(host.serverId)).join(", ")}.</Text>
         )}
+      </SettingsSection>
+
+      <SettingsSection title="Hidden">
+        <SettingsCard>
+          {hidden.size === 0 ? (
+            <SettingsRow label="Nothing hidden" hint="Hide workspaces from the lists above." />
+          ) : (
+            [...hidden]
+              .sort((a, b) => a.localeCompare(b))
+              .map((name) => (
+                <SettingsRow key={name} label={name} hint={hostsByName.get(name)?.join(", ") ?? missingHint}>
+                  <IconButton
+                    theme={theme}
+                    icon="Eye"
+                    label="Show in sidebar"
+                    busy={saving === name}
+                    onPress={() => void toggleHidden(name, false)}
+                  />
+                </SettingsRow>
+              ))
+          )}
+        </SettingsCard>
+        {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
+        <Text style={muted}>
+          Hidden workspaces leave the sidebar with their chats, pinned ones included, here and on your phone. The list is
+          saved on each host.
+        </Text>
       </SettingsSection>
     </>
   );
