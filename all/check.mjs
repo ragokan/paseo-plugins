@@ -6,10 +6,15 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirements";
 import ts from "typescript";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+
+// The app skips a plugin its version doesn't meet, and the iOS and Android apps are on stable 0.12.
+const manifest = JSON.parse(readFileSync(path.join(root, "paseo-plugin.json"), "utf8"));
+for (const version of ["0.12.0", "0.13.0-beta.1"]) assertPluginCompatibility({ ...manifest, version, runtime: "app" });
 
 // Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
 const modules = new Map();

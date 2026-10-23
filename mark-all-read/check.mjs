@@ -71,7 +71,11 @@ daemonReply = { success: false, error: "workspace gone" };
 await assert.rejects(daemonClient.clearWorkspaceAttention(["ws-a"]), /workspace gone/);
 
 // The command palette runs global items and shows a thrown error as a toast; the icon is a Lucide name.
-assert.match(bundle, /if\("global"===\w+\.context\)return void await \w+\.onSelect\(\{context:"global",\.\.\.\w+\}\)/);
+// 0.12's bundle spells the spread Object.assign({context:"global"},x).
+assert.match(
+  bundle,
+  /if\("global"===\w+\.context\)return void await \w+\.onSelect\((\{context:"global",\.\.\.\w+\}|Object\.assign\(\{context:"global"\},\w+\))\)/,
+);
 assert.match(bundle, /reportError\((\w+)\)\{\w+\.error\(\1 instanceof Error\?\1\.message:String\(\1\)\)\}/);
 assert.match(bundle, /defineProperty\(\w+,"CheckCheck",\{enumerable/);
 

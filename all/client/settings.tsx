@@ -1,12 +1,17 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
-import { Loading, SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { useEffect } from "react";
+import * as ui from "@getpaseo/plugin/client/ui";
+import { SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { useEffect, type ComponentType } from "react";
+import { ActivityIndicator } from "react-native";
 import { APP_FEATURES, HOST_FEATURES, hostFeatureSettings, type HostFeatures } from "../shared/features";
 import { canSaveAppFeatures, setAppFeature, useAppFeatures } from "./app-features";
 
 // The host applies its own default for machine status; values arrive with it filled in.
 const hostSettings = hostFeatureSettings(false);
+
+// Paseo 0.13 added Loading to the plugin UI kit; the 0.12 app leaves it undefined.
+const Loading = (ui as Partial<{ Loading: ComponentType }>).Loading ?? ActivityIndicator;
 
 interface FeatureSettingsProps extends PluginSurfaceProps {
   onHostChange(features: HostFeatures): void;

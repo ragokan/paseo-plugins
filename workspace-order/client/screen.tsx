@@ -1,6 +1,8 @@
 import type { PluginHostSummary, PluginScreenProps, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getpaseo/plugin/client/ui";
+// The 0.12 app has Icon and ScrollView only here; 0.13 moved them to client/ui and keeps this as an alias.
+import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
+import { SettingsCard, SettingsInput, SettingsRow, SettingsSection } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
