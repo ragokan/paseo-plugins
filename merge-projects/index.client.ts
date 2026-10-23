@@ -1,10 +1,9 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { Platform } from "react-native";
 
 // This plugin typechecks without the DOM library. Declare only what this module uses.
-declare const document: { scripts: ArrayLike<{ src: string }> };
-declare function fetch(url: string): Promise<{ text(): Promise<string> }>;
 declare const console: { warn(...args: unknown[]): void };
+declare function setTimeout(callback: () => void, ms: number): unknown;
+declare function clearTimeout(handle: unknown): void;
 
 // The fields of Paseo's WorkspaceStructureProject this plugin reads or rewrites.
 export interface StructureProject {
@@ -18,6 +17,11 @@ export interface StructureProject {
 type BuildProjects = ((input: unknown) => StructureProject[]) & { original?: BuildProjects; loads?: number };
 interface StructureModule {
   buildWorkspaceStructureProjects: BuildProjects;
+}
+// An entry in Metro's module registry.
+interface MetroModule {
+  isInitialized?: boolean;
+  publicModule?: { exports?: Partial<StructureModule> };
 }
 
 /**
@@ -48,23 +52,36 @@ export function mergeSameNamedProjects<P extends StructureProject>(projects: P[]
 }
 
 // shortcut: the plugin SDK has no API for project grouping, so this finds the app's own
-// workspace-structure module in its Metro bundle and wraps buildWorkspaceStructureProjects, which
-// the sidebar and the project pickers all call. Desktop/web only, and breaks if Paseo renames that
-// function; switch to an SDK call once one exists.
-export async function findStructureModule(): Promise<StructureModule> {
-  const bundle = Array.from(document.scripts).find((script) => script.src.includes("/_expo/static/js/"));
-  if (!bundle) throw new Error("Paseo app bundle not found");
-  const source = await (await fetch(bundle.src)).text();
-  const start = source.indexOf(".buildWorkspaceStructureProjects=function");
-  const end = source.indexOf("\n", start);
-  // Each Metro module is one line ending in `},<moduleId>,[<deps>]);`.
-  const moduleId = start < 0 ? undefined : /,(\d+),\[[\d,]*\]\);$/.exec(source.slice(start, end < 0 ? undefined : end))?.[1];
-  const metroRequire = (globalThis as { __r?: (id: number) => Partial<StructureModule> }).__r;
-  const module = moduleId && metroRequire ? metroRequire(Number(moduleId)) : undefined;
-  if (typeof module?.buildWorkspaceStructureProjects !== "function") {
-    throw new Error("Paseo project grouping not found");
+// workspace-structure module among the modules Metro has loaded and wraps
+// buildWorkspaceStructureProjects, which the sidebar and the project pickers all call. Breaks if
+// Paseo renames that function or Metro stops keeping modules in a Map; switch to an SDK call once
+// one exists.
+export function findStructureModule(): StructureModule {
+  const metroRequire = (globalThis as { __r?: (id: unknown) => unknown }).__r;
+  if (typeof metroRequire !== "function") throw new Error("Metro runtime not found");
+  // Metro's require starts with modules.get(id), so asking for an id no module has hands over the
+  // registry Map. The probe answers as an already loaded module, so Metro runs no module code and
+  // takes no error path, which would be fatal in a release build on iOS and Android.
+  const probe = Symbol("merge-projects");
+  const get = Map.prototype.get;
+  let modules: Map<unknown, MetroModule> | undefined;
+  Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+    if (key !== probe) return get.call(this, key);
+    modules = this as Map<unknown, MetroModule>;
+    return { isInitialized: true, publicModule: { exports: undefined } };
+  };
+  try {
+    metroRequire(probe);
+  } finally {
+    Map.prototype.get = get;
   }
-  return module as StructureModule;
+  if (!modules) throw new Error("Metro module registry not found");
+  // Only modules that have already run: requiring another one would run its code early.
+  for (const module of modules.values()) {
+    const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
+    if (typeof exports?.buildWorkspaceStructureProjects === "function") return exports as StructureModule;
+  }
+  throw new Error("Paseo project grouping not found");
 }
 
 // The app loads this plugin once per host that has it installed, so loads share one wrapper and
@@ -87,11 +104,21 @@ export function patch(module: StructureModule): () => void {
 }
 
 export default function contribute(_client: PluginClientContext) {
-  // The module lookup reads the web bundle, so iOS and Android keep Paseo's own grouping.
-  if (Platform.OS !== "web") return () => {};
-  const unpatch = findStructureModule().then(patch, (error) => {
-    console.warn("[merge-projects]", error);
-    return () => {};
-  });
-  return async () => (await unpatch)();
+  let unpatch: (() => void) | undefined;
+  let retry: unknown;
+  let attempts = 0;
+  // The grouping module may not have loaded yet when the plugin starts, so look again for a while.
+  const attach = () => {
+    try {
+      unpatch = patch(findStructureModule());
+    } catch (error) {
+      if (++attempts < 30) retry = setTimeout(attach, 1000);
+      else console.warn("[merge-projects]", error);
+    }
+  };
+  attach();
+  return () => {
+    clearTimeout(retry);
+    unpatch?.();
+  };
 }

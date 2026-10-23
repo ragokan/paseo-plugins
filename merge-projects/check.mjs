@@ -1,5 +1,6 @@
-// Runs the plugin against the installed Paseo app bundle: finds the grouping module, then merges
-// real buildWorkspaceStructureProjects output. Re-run after Paseo updates:
+// Runs the plugin against the installed Paseo app bundle: finds the grouping module through the
+// bundle's own Metro runtime, then merges real buildWorkspaceStructureProjects output. Re-run after
+// Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -19,38 +20,73 @@ const { outputText } = ts.transpileModule(readFileSync(new URL("index.client.ts"
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 });
 const plugin = { exports: {} };
-new Function("require", "module", "exports", outputText)(() => ({}), plugin, plugin.exports);
-const { findStructureModule, patch } = plugin.exports;
+// Loaded as on iOS, where the plugin used to do nothing.
+const require = (name) => (name === "react-native" ? { Platform: { OS: "ios" } } : {});
+new Function("require", "module", "exports", outputText)(require, plugin, plugin.exports);
+const { default: contribute, findStructureModule, patch } = plugin.exports;
 
-// Minimal Metro runtime over the bundle's own module lines, so the test runs Paseo's real code.
-const lines = new Map();
-for (const line of bundle.split("\n")) {
+assert.throws(findStructureModule, /Metro runtime not found/);
+
+// The bundle's own Metro runtime (the same one the iOS and Android builds use), with an ErrorUtils
+// like React Native's, whose fatal report crashes a release build.
+const lines = bundle.split("\n");
+const mapGet = Map.prototype.get;
+const fatal = [];
+globalThis.ErrorUtils = { reportFatalError: (error) => fatal.push(error) };
+globalThis.__METRO_GLOBAL_PREFIX__ = "";
+(0, eval)(lines.find((line) => line.includes("Requiring unknown module")));
+const metroDefine = globalThis.__d;
+
+// Defines the grouping module, everything it imports, and some other app modules, counting which
+// module factories run.
+const moduleLines = new Map();
+for (const line of lines) {
   const match = line.startsWith("__d(") && /\},(\d+),\[([\d,]*)\]\);$/.exec(line);
-  if (match) lines.set(Number(match[1]), line);
+  if (match) moduleLines.set(Number(match[1]), { line, deps: match[2] ? match[2].split(",").map(Number) : [] });
 }
-const modules = new Map();
-function metroRequire(id) {
-  if (!modules.has(id)) {
-    let definition;
-    new Function("__d", lines.get(id))((factory, _id, deps) => (definition = { factory, deps }));
-    const module = { exports: {} };
-    modules.set(id, module);
-    definition.factory(globalThis, metroRequire, metroRequire, metroRequire, module, module.exports, definition.deps);
-  }
-  return modules.get(id).exports;
-}
+const structureId = [...moduleLines].find(([, { line }]) => line.includes(".buildWorkspaceStructureProjects=function"))[0];
+const ran = new Set();
+const defined = new Set();
+globalThis.__d = (factory, id, deps) =>
+  metroDefine(function (...args) {
+    ran.add(id);
+    return factory.apply(this, args);
+  }, id, deps);
+const define = (id, { withImports = false } = {}) => {
+  if (defined.has(id)) return;
+  defined.add(id);
+  (0, eval)(moduleLines.get(id).line);
+  if (withImports) moduleLines.get(id).deps.forEach((dep) => define(dep, { withImports }));
+};
+define(structureId, { withImports: true });
+const others = [...moduleLines.keys()].filter((id) => !defined.has(id)).slice(0, 200);
+others.forEach((id) => define(id));
 
-async function lookup(source) {
-  let requestedId;
-  globalThis.document = { scripts: [{ src: "app://other.js" }, { src: "app:///_expo/static/js/web/index.js" }] };
-  globalThis.fetch = async () => ({ text: async () => source });
-  globalThis.__r = (id) => ((requestedId = id), metroRequire(id));
-  return { module: await findStructureModule(), requestedId };
-}
+// Not loaded yet: the lookup finds nothing and loads nothing.
+assert.throws(findStructureModule, /project grouping not found/);
+assert.equal(ran.size, 0);
 
-const { module, requestedId } = await lookup(bundle);
-assert.match(lines.get(requestedId), /\.buildWorkspaceStructureProjects=function/);
-await assert.rejects(lookup("__d(function(){},1,[]);"), /project grouping not found/);
+// Not loaded when the plugin starts: it looks again until the app has loaded the module.
+const timers = [];
+globalThis.setTimeout = (callback) => timers.push(callback);
+globalThis.clearTimeout = () => {};
+const stopEarly = contribute({});
+assert.equal(timers.length, 1);
+const structure = globalThis.__r(structureId);
+const original = structure.buildWorkspaceStructureProjects;
+const ranByApp = new Set(ran);
+timers.shift()();
+assert.equal(timers.length, 0);
+assert.equal(typeof structure.buildWorkspaceStructureProjects.original, "function");
+stopEarly();
+assert.equal(structure.buildWorkspaceStructureProjects, original);
+
+const module = findStructureModule();
+assert.equal(module, structure);
+assert.deepEqual(ran, ranByApp, "the lookup ran no module code");
+assert.ok(others.every((id) => !ran.has(id)));
+assert.deepEqual(fatal, []);
+assert.equal(Map.prototype.get, mapGet);
 
 // The user's hosts as of 22/10/2026, plus a same-host name clash and a git remote on two hosts.
 const AIR = "srv_air", MINI = "srv_mini", BOX = "srv_box";
@@ -88,7 +124,6 @@ const sessions = [
   },
 ];
 
-const original = module.buildWorkspaceStructureProjects;
 const before = original({ sessions });
 assert.equal(before.filter((p) => p.projectName === "ragokan").length, 3);
 
@@ -122,4 +157,4 @@ unpatch();
 assert.equal(module.buildWorkspaceStructureProjects({ sessions }).length, after.length);
 unpatchSecondHost();
 assert.equal(module.buildWorkspaceStructureProjects, original);
-console.log(`ok: grouping is module ${requestedId} in ${bundlePath}; merged ${before.length} projects into ${after.length}`);
+console.log(`ok: grouping is module ${structureId} in ${bundlePath}; merged ${before.length} projects into ${after.length}`);
