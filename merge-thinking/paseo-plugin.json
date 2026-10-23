@@ -1,7 +1,7 @@
 {
   "id": "merge-thinking",
   "name": "Merge thinking into tool groups",
-  "description": "Folds thinking rows between tool calls into the collapsed tool call group",
+  "description": "Folds thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group",
   "requirements": {
     "paseo": ">=0.12.0"
   }

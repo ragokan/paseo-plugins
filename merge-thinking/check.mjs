@@ -171,6 +171,22 @@ assert.deepEqual(rows(split), { tail: ["user_message", "group(think,shell,think,
 // A turn without tool calls is left alone.
 assert.deepEqual(rows(project([user(5), thought(5), reply(5)], [])).tail, ["user_message", "thought", "assistant_message"]);
 
+// Thoughts in a row group on their own, like the 23/10/2026 screenshot's four Thinking rows
+// between a message and the reply.
+const thoughtsOnly = project([user(6), thought(6), thought(6), thought(6), thought(6), reply(6)], []);
+assert.deepEqual(rows(thoughtsOnly).tail, ["user_message", "group(think,think,think,think)", "assistant_message"]);
+assert.equal(label(thoughtsOnly.groupsByHostId.get(thoughtsOnly.tail[1].id).summary), "Thought 4 times");
+// While they stream, the group spins.
+const streaming = project([user(7)], [thought(7), thought(7), thought(7, "loading")]);
+assert.deepEqual(rows(streaming).head, ["group(think,think,think)"]);
+const streamingGroup = streaming.groupsByHostId.get(streaming.head[0].id);
+assert.equal(streamingGroup.isLoading, true);
+assert.equal(label(streamingGroup.summary), "Thought 3 times");
+// Without Paseo's i18next such a group would have no label, so its thoughts stay apart.
+const unpatchUnlabeled = patch(module);
+assert.deepEqual(rows(project([user(8), thought(8), thought(8), reply(8)], [])).tail, ["user_message", "thought", "thought", "assistant_message"]);
+unpatchUnlabeled();
+
 // Every host's copy keeps the merge until the last one unloads; unloading twice is harmless.
 unpatch();
 unpatch();

@@ -58,20 +58,27 @@ function asToolCall({ text, status, ...thought }: StreamItem): StreamItem {
 /**
  * Turns each thought next to a groupable tool call, ignoring other thoughts in between, into a
  * "thinking" tool call so it joins that call's group. `toolBefore` says whether a tool call run
- * comes right before `items`. Returns `items` itself when nothing changes.
+ * comes right before `items`. With `thoughtRuns`, two or more thoughts in a row group on their own
+ * too. Returns `items` itself when nothing changes.
  */
-export function absorbThoughts(items: StreamItem[], isGroupable: (item: StreamItem) => boolean, toolBefore = false): StreamItem[] {
+export function absorbThoughts(
+  items: StreamItem[],
+  isGroupable: (item: StreamItem) => boolean,
+  toolBefore = false,
+  thoughtRuns = true,
+): StreamItem[] {
   const toolAfter: boolean[] = [];
   let tool = false;
   for (let i = items.length - 1; i >= 0; i--) {
     if (items[i]!.kind === "thought") toolAfter[i] = tool;
     else tool = isGroupable(items[i]!);
   }
+  const inRun = (i: number) => thoughtRuns && (items[i - 1]?.kind === "thought" || items[i + 1]?.kind === "thought");
   tool = toolBefore;
   let out: StreamItem[] | undefined;
   items.forEach((item, i) => {
     if (item.kind !== "thought") tool = isGroupable(item);
-    else if (tool || toolAfter[i]) (out ??= [...items])[i] = asToolCall(item);
+    else if (tool || toolAfter[i] || inRun(i)) (out ??= [...items])[i] = asToolCall(item);
   });
   return out ?? items;
 }
@@ -167,17 +174,19 @@ export function patch(module: GroupingModule, i18n?: I18n): () => void {
   const { original } = state;
   const { isGroupableToolCall } = module;
   if (i18n) wordThoughtCounts(i18n);
+  // A group of only thoughts is labeled by its thought count alone, so it needs the wrapped t().
+  const thoughtRuns = !!i18n;
   const copy: GroupingFunctions = {
     prepareGroupedHistory: (input) =>
       original.prepareGroupedHistory({
         ...input,
-        tail: absorbThoughts(input.tail!, isGroupableToolCall),
+        tail: absorbThoughts(input.tail!, isGroupableToolCall, false, thoughtRuns),
         buildGroup: withThoughts(input.buildGroup, !!i18n),
       }),
     groupLiveToolCalls: (input) =>
       original.groupLiveToolCalls({
         ...input,
-        head: absorbThoughts(input.head!, isGroupableToolCall, input.history!.pendingCalls.length > 0),
+        head: absorbThoughts(input.head!, isGroupableToolCall, input.history!.pendingCalls.length > 0, thoughtRuns),
         buildGroup: withThoughts(input.buildGroup, !!i18n),
       }),
   };
