@@ -40,7 +40,7 @@ export function orderProjects<Input extends ProjectionInput>(input: Input, names
 }
 
 /**
- * Leaves the named groups, and those whose name starts with 0, out of the sidebar with their chats,
+ * Leaves the named groups, and those whose name starts with a digit, out of the sidebar with their chats,
  * pinned ones included: Paseo takes pinned chats from the groups it is given. In status grouping the
  * chats come from the workspace entries, so those go too.
  */

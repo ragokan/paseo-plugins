@@ -293,11 +293,11 @@ assert.deepEqual(pinned.map((chat) => chat.workspaceId), ["warp-chat"]);
 await setHidden("pasode", false);
 assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [] })), ["ragokan", "pasode", "coding", "warp"]);
 
-// A name starting with 0 is always hidden, picked or not, with its shortcuts.
-const scratch = group("0-scratch", [BOX], `host:${BOX}:/home/0-scratch`);
-assert.ok(!readHidden().has("0-scratch"));
-assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })), ["ragokan", "pasode", "coding", "warp"]);
-assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
+// A name starting with a digit is always hidden, picked or not, with its shortcuts.
+const numbered = [group("3608-overlays-close-on-settings", [BOX], `remote:github.com/getpaseo/paseo#3608`), group("0-scratch", [BOX], `host:${BOX}:/home/0-scratch`)];
+assert.ok(numbered.every((p) => !readHidden().has(p.projectName)));
+assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: numbered })), ["ragokan", "pasode", "coding", "warp"]);
+assert.deepEqual(shortcuts(layout({ hosts: [BOX], storedOrder: [], extra: numbered })), ["ragokan-chat", "pasode-chat", "coding-chat", "warp-chat"]);
 
 // Status grouping takes chats from the workspace entries; a hidden group's go, by key or by name.
 const entries = new Map([
@@ -336,6 +336,6 @@ assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] }))[0], "warp");
 unpatchSecondHost();
 assert.equal(projection.buildSidebarProjection, original);
 assert.deepEqual(names(layout({ hosts: ALL, storedOrder: [] })), ["coding", "dev", "pasode", "ragokan", "warp"]);
-assert.ok(names(layout({ hosts: [BOX], storedOrder: [], extra: [scratch] })).includes("0-scratch"), "Paseo itself shows it");
+assert.deepEqual(names(layout({ hosts: [BOX], storedOrder: [], extra: numbered })).slice(-2), ["3608-overlays-close-on-settings", "0-scratch"], "Paseo itself shows them");
 for (const stop of leave.values()) stop();
 console.log(`ok: sidebar layout, order store and hiding in ${bundlePath}`);

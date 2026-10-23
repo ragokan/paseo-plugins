@@ -171,8 +171,8 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
             <SettingsRow label="Nothing hidden" hint="Hide workspaces from the lists above." />
           ) : (
             hiddenNames.map((name) =>
-              alwaysHidden(name) && !hidden.has(name) ? (
-                <SettingsRow key={name} label={name} hint="Starts with 0, so always hidden" />
+              alwaysHidden(name) ? (
+                <SettingsRow key={name} label={name} hint="Starts with a digit, so always hidden" />
               ) : (
                 <SettingsRow key={name} label={name} hint={hostsByName.get(name)?.join(", ") ?? missingHint}>
                   <IconButton
@@ -190,7 +190,7 @@ export function WorkspaceOrder({ theme }: { theme: Theme }) {
         {saveError && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{saveError}</Text>}
         <Text style={muted}>
           Hidden workspaces leave the sidebar with their chats, pinned ones included, here and on your phone. The list is
-          saved on each host. Workspaces whose name starts with 0 are always hidden.
+          saved on each host. Workspaces whose name starts with a digit are always hidden.
         </Text>
       </SettingsSection>
     </>
