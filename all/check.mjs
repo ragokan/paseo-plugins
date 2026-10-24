@@ -12,9 +12,9 @@ import ts from "typescript";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-// The app skips a plugin its version doesn't meet, and the iOS and Android apps are on stable 0.12.
+// The app skips a plugin its version doesn't meet; 0.13.0 is the oldest Paseo these plugins support.
 const manifest = JSON.parse(readFileSync(path.join(root, "paseo-plugin.json"), "utf8"));
-for (const version of ["0.12.0", "0.13.0"]) assertPluginCompatibility({ ...manifest, version, runtime: "app" });
+assertPluginCompatibility({ ...manifest, version: "0.13.0", runtime: "app" });
 
 // Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
 const modules = new Map();

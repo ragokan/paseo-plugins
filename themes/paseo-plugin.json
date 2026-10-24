@@ -2,6 +2,6 @@
   "id": "themes",
   "description": "Monokai Pro filters as Paseo app themes",
   "requirements": {
-    "paseo": ">=0.8.0"
+    "paseo": ">=0.13.0"
   }
 }

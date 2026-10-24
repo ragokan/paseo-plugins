@@ -3,6 +3,6 @@
   "name": "Hide workspaces",
   "description": "Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, and show the ones waiting on a subagent as Waiting",
   "requirements": {
-    "paseo": ">=0.12.0"
+    "paseo": ">=0.13.0"
   }
 }

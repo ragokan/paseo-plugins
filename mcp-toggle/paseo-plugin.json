@@ -7,6 +7,6 @@
     "assets/composer-pill.png"
   ],
   "requirements": {
-    "paseo": ">=0.12.0"
+    "paseo": ">=0.13.0"
   }
 }
