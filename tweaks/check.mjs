@@ -589,10 +589,12 @@ const kinds = (input) => metaRow.selectMetaRowItems(input).map((item) => item.ki
 assert.deepEqual(kinds(rowInput()), ["project", "host", "labels"], "Paseo puts the folder before the machine");
 
 const icon = React.createElement("ServerIcon", { size: 12 });
+const badgeStyle = { flexDirection: "row" };
 const badgeModule = {
   HOST_BADGE_ICON_SIZE: 12,
   HostBadge: ({ badge }) =>
     React.createElement("View", {
+      style: badgeStyle,
       testID: `host-badge-${badge.serverId}`,
       children: [icon, badge.showLabel ? React.createElement("Text", { children: badge.label }) : null],
     }),
@@ -626,8 +628,10 @@ const named = badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox"
 assert.equal(named.props.testID, `host-badge-${BOX}`);
 assert.equal(React.Children.toArray(named.props.children).length, 1, "the name without the server icon");
 assert.equal(React.Children.toArray(named.props.children)[0].props.children, "ragdevbox");
+assert.deepEqual(named.props.style, [badgeStyle, { opacity: 0.75 }], "a quarter fainter");
 const iconOnly = badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: false } });
 assert.equal(iconOnly.props.children[0], icon, "a badge showing no name keeps its icon");
+assert.equal(iconOnly.props.style, badgeStyle, "and its strength");
 assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop, "not loaded yet");
 assert.equal(looks.length, 2);
 registry.set("form", loaded(formModule));

@@ -8,7 +8,7 @@ A workspace in Done whose agent waits on a subagent sits in a Waiting group abov
 
 On the desktop and web apps, Idle's group icon is a minus in a circle, in the yellow of an amber label; on iOS and Android it keeps Done's check.
 
-A host's name shows without the server icon in front of it, in the sidebar rows and wherever else Paseo shows a host's badge. A host set to show only its icon keeps it. In the sidebar rows the host comes first, before the folder, and the New workspace screen has the host picker before the project picker, and on the desktop and web apps shows the host's name without its status dot.
+A host's name shows without the server icon in front of it, and a quarter fainter in its color, in the sidebar rows and wherever else Paseo shows a host's badge. A host set to show only its icon keeps it. In the sidebar rows the host comes first, before the folder, and the New workspace screen has the host picker before the project picker, and on the desktop and web apps shows the host's name without its status dot.
 
 On the desktop and web apps, a label named Done is gray, like Paseo's Done group. Paseo's label colors have no gray, so the status-labels plugin gives Done indigo, which the iOS and Android apps show.
 
