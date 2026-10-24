@@ -41,18 +41,12 @@ export function hostFirst<Item extends MetaItem>(items: Item[]): Item[] {
   return at > 0 ? [items[at]!, ...items.slice(0, at), ...items.slice(at + 1)] : items;
 }
 
-// How strong a host's name shows in its color: a quarter fainter than Paseo draws it.
-export const HOST_NAME_OPACITY = 0.75;
-
-/**
- * Paseo's host badge, a server icon and the host's name, with the name alone when it shows one, a
- * quarter fainter.
- */
+/** Paseo's host badge, a server icon and the host's name, with the name alone when it shows one. */
 export function withoutServerIcon(badge: unknown, showsName: boolean): unknown {
-  if (!showsName || !isValidElement<{ children?: unknown; style?: unknown }>(badge)) return badge;
+  if (!showsName || !isValidElement<{ children?: unknown }>(badge)) return badge;
   const children = badge.props.children;
   if (!Array.isArray(children) || children.length !== 2 || !children[1]) return badge;
-  return cloneElement(badge, { style: [badge.props.style, { opacity: HOST_NAME_OPACITY }] }, children[1] as ReactNode);
+  return cloneElement(badge, undefined, children[1] as ReactNode);
 }
 
 // Whether a node is, or holds within depth levels, the element with this testID.
