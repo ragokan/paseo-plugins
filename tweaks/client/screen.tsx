@@ -24,7 +24,7 @@ async function listGroupNames(serverId: string): Promise<string[]> {
 function useHostListings(hosts: readonly PluginHostSummary[]) {
   const online = hosts.filter((host) => host.status === "online").map((host) => host.serverId);
   return useQuery({
-    queryKey: ["hide-workspaces", online],
+    queryKey: ["tweaks", online],
     queryFn: () =>
       Promise.all(
         online.map(async (serverId): Promise<HostListing> => {

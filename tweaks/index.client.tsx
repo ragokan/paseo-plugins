@@ -4,34 +4,45 @@ import { joinAgents, readWaiting } from "./client/agents";
 import { joinWorkspaceSettings, markDone, readDone } from "./client/hosts";
 import { waitsInIdle } from "./client/idle";
 import { HideWorkspacesSettings } from "./client/screen";
-import { findSidebarModules, patch } from "./client/sidebar";
+import { findSidebarModules, metroModules, patch } from "./client/sidebar";
+import { applyTweaks } from "./client/tweaks";
+import { styleIdleGroup } from "./client/web";
 
 declare const console: { warn(...args: unknown[]): void };
 declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
 
-/** The sidebar patch, plus on desktop and web the settings page that hides workspaces. */
-export function contributeSidebar(client: PluginClientContext) {
+/**
+ * What changes the app itself: the sidebar patch, the host badges and the New workspace form, Idle's
+ * icon, and on desktop and web the settings page that hides workspaces.
+ */
+export function contributeApp(client: PluginClientContext) {
   // The page is desktop and web only; the iOS and Android apps follow the hidden workspaces the hosts keep.
   if (Platform.OS === "web") {
     client.addSettingsScreen({ id: "hide-workspaces", title: "Hide Workspaces", icon: "EyeOff", Component: HideWorkspacesSettings });
   }
+  const unstyle = styleIdleGroup();
   let unpatch: (() => void) | undefined;
+  let untweak: (() => void) | undefined;
   let retry: unknown;
   let attempts = 0;
   // The sidebar modules may not have loaded yet when the plugin starts, so look again for a while.
   const attach = () => {
     try {
-      unpatch = patch(findSidebarModules());
+      const modules = metroModules();
+      untweak ??= applyTweaks(modules);
+      unpatch = patch(findSidebarModules(modules));
     } catch (error) {
       if (++attempts < 30) retry = setTimeout(attach, 1000);
-      else console.warn("[hide-workspaces]", error);
+      else console.warn("[tweaks]", error);
     }
   };
   attach();
   return () => {
     clearTimeout(retry);
     unpatch?.();
+    untweak?.();
+    unstyle();
   };
 }
 
@@ -74,9 +85,9 @@ export function contributeEveryCopy(client: PluginClientContext) {
 export default function contribute(client: PluginClientContext) {
   const leaveHosts = joinWorkspaceSettings(client);
   const stopEveryCopy = contributeEveryCopy(client);
-  const stopSidebar = contributeSidebar(client);
+  const stopApp = contributeApp(client);
   return () => {
-    stopSidebar();
+    stopApp();
     stopEveryCopy();
     leaveHosts();
   };

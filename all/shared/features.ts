@@ -6,10 +6,15 @@ import { z } from "zod";
 // saved in the app. "host" plugins act on the host they are installed on, so each host runs its own,
 // switched from that host's settings.
 export const FEATURES = [
-  { id: "hide-workspaces", scope: "app", title: "Hide workspaces", hint: "Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, and show the ones waiting on a subagent as Waiting" },
   { id: "mark-all-read", scope: "app", title: "Mark all as read", hint: "A command palette action that marks every agent on every host as read" },
   { id: "merge-thinking", scope: "app", title: "Merge thinking into tool groups", hint: "Folds thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group" },
   { id: "themes", scope: "app", title: "Monokai themes", hint: "Monokai Pro filters as Paseo app themes" },
+  {
+    id: "tweaks",
+    scope: "app",
+    title: "Tweaks",
+    hint: "Hide the sidebar's workspaces you pick, Idle and Waiting groups with Mark as done, Idle's own icon, host names without the server icon, and the machine before the folder",
+  },
   {
     id: "mcp-toggle",
     scope: "host",

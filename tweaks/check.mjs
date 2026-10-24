@@ -245,7 +245,7 @@ function fakeHost(label, stored = {}) {
   };
   host.changed = (settingsId) => {
     for (const observer of host.observers) {
-      observer.update({ type: "status", payload: { status: "plugin_settings_changed", pluginId: "hide-workspaces", settingsId } });
+      observer.update({ type: "status", payload: { status: "plugin_settings_changed", pluginId: "tweaks", settingsId } });
     }
   };
   return host;
@@ -567,4 +567,83 @@ assert.deepEqual(names(layout({ hosts: [BOX], extra: numbered })).slice(-2), ["3
 // With no host left, nothing is hidden.
 for (const stop of leave.values()) stop();
 assert.deepEqual(hidden(), []);
-console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle in ${bundlePath}`);
+
+// The tweaks. Paseo's selectMetaRowItems runs here as it is; HostBadge and the New workspace form
+// need the app's theme and page, so stand-ins shaped like them take their place.
+const React = require("react");
+const { applyTweaks } = loadPlugin("client/tweaks.ts");
+const { metroModules } = loadPlugin("client/sidebar.ts");
+const metaRow = metroRequire(idOf(".selectMetaRowItems=function"));
+const selectMetaRowItems = metaRow.selectMetaRowItems;
+const rowInput = (visible = {}) => ({
+  currentBranch: "main",
+  projectName: "ragokan",
+  hasHostBadge: true,
+  prHint: null,
+  serviceSummary: null,
+  labels: [{ name: "Idle", color: "amber" }],
+  visible: { branch: false, project: true, changeRequest: true, services: true, labels: true, ...visible },
+  checksDisplay: "none",
+});
+const kinds = (input) => metaRow.selectMetaRowItems(input).map((item) => item.kind);
+assert.deepEqual(kinds(rowInput()), ["project", "host", "labels"], "Paseo puts the folder before the machine");
+
+const icon = React.createElement("ServerIcon", { size: 12 });
+const badgeModule = {
+  HOST_BADGE_ICON_SIZE: 12,
+  HostBadge: ({ badge }) =>
+    React.createElement("View", {
+      testID: `host-badge-${badge.serverId}`,
+      children: [icon, badge.showLabel ? React.createElement("Text", { children: badge.label }) : null],
+    }),
+};
+const field = (testID) => React.createElement("FieldTrigger", { testID });
+const control = (child) => React.createElement("View", { children: child });
+const hostPicker = React.createElement("HostPicker", { children: field("host-picker-trigger") });
+const forms = {
+  desktop: React.createElement("View", { children: [control(field("new-workspace-project-picker-trigger")), control(hostPicker), control(field("isolation"))] }),
+  compact: React.createElement("View", { children: [field("new-workspace-project-picker-trigger"), hostPicker, field("isolation")] }),
+  other: React.createElement("View", { children: [field("isolation"), field("new-workspace-project-picker-trigger")] }),
+};
+const formModule = { useNewWorkspaceForm: (layout) => forms[layout] };
+const loaded = (exports) => ({ isInitialized: true, publicModule: { exports } });
+const store = { hosts: [{ serverId: BOX }], emitted: 0, emitHostList() { this.emitted += 1; } };
+globalThis.__paseoHostRuntimeStore = store;
+
+// The New workspace screen's module loads later than the rest: it is looked for again.
+const registry = new Map([...metroModules(), ["badge", loaded(badgeModule)]]);
+const looks = [];
+globalThis.setTimeout = (callback, ms) => (looks.push({ callback, ms }), looks.length);
+const hostsBefore = store.hosts;
+const untweak = applyTweaks(registry);
+const untweakSecondHost = applyTweaks(registry);
+assert.deepEqual(kinds(rowInput()), ["host", "project", "labels"], "the machine before the folder");
+assert.deepEqual(kinds(rowInput({ branch: true })), ["host", "branch", "project", "labels"]);
+assert.deepEqual(kinds({ ...rowInput(), hasHostBadge: false }), ["project", "labels"]);
+assert.ok(store.emitted >= 1 && store.hosts !== hostsBefore && store.hosts[0] === hostsBefore[0], "the rows draw again");
+const named = badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: true } });
+assert.equal(named.props.testID, `host-badge-${BOX}`);
+assert.equal(React.Children.toArray(named.props.children).length, 1, "the name without the server icon");
+assert.equal(React.Children.toArray(named.props.children)[0].props.children, "ragdevbox");
+const iconOnly = badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: false } });
+assert.equal(iconOnly.props.children[0], icon, "a badge showing no name keeps its icon");
+assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop, "not loaded yet");
+assert.equal(looks.length, 2);
+registry.set("form", loaded(formModule));
+looks.shift().callback();
+const fields = (form) => React.Children.toArray(form.props.children).map((child) => JSON.stringify(child.props).match(/"testID":"([^"]+)"/)[1]);
+assert.deepEqual(fields(formModule.useNewWorkspaceForm("desktop")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
+assert.deepEqual(fields(formModule.useNewWorkspaceForm("compact")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
+assert.equal(formModule.useNewWorkspaceForm("other"), forms.other, "fields it does not know stay put");
+looks.shift().callback();
+assert.equal(looks.length, 0, "all found, no more looking");
+// The last copy to unload puts Paseo's own back.
+untweak();
+assert.deepEqual(kinds(rowInput()), ["host", "project", "labels"]);
+untweakSecondHost();
+assert.equal(metaRow.selectMetaRowItems, selectMetaRowItems);
+assert.equal(badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: true } }).props.children.length, 2);
+assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop);
+globalThis.setTimeout = realSetTimeout;
+delete globalThis.__paseoHostRuntimeStore;
+console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, and the tweaks in ${bundlePath}`);

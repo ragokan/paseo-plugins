@@ -4,7 +4,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 
 | Plugin | What it does |
 |---|---|
-| [hide-workspaces](hide-workspaces) | Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, with Mark as done in the command palette, and show the ones waiting on a subagent as Waiting. |
+| [tweaks](tweaks) | Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, with Mark as done in the command palette, show the ones waiting on a subagent as Waiting, give Idle its own icon, show host names without the server icon, and put the machine before the folder. |
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |

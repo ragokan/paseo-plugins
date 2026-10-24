@@ -69,7 +69,7 @@ test("a later time for the same stay in Done keeps the earlier one", () => {
 
 // ragmini's "LinkedIn reply messages" on 2026-10-24: the app showed it in Done, entered a day before
 // and marked as done, while the plugin's new connection read 16:25 that day and labeled it Idle.
-test("a workspace seen for the first time starts from hide-workspaces' mark, the app's time", () => {
+test("a workspace seen for the first time starts from the tweaks plugin's mark, the app's time", () => {
   const now = Date.parse("2026-10-24T16:44:24Z");
   const workspace = {
     id: "wks_a62be6c5ef3b54f1",

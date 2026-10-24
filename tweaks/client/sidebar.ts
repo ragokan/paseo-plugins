@@ -35,6 +35,7 @@ interface MetroModule {
   isInitialized?: boolean;
   publicModule?: { exports?: Record<string, unknown> };
 }
+export type MetroModules = ReadonlyMap<unknown, MetroModule>;
 
 /**
  * Leaves the named groups, and those whose name starts with a digit, out of the sidebar with their chats,
@@ -55,19 +56,17 @@ export function hideProjects<Input extends ProjectionInput>(input: Input, names:
   };
 }
 
-// shortcut: the plugin SDK has no sidebar API, so this finds the app's own modules among those
-// Metro has loaded: buildSidebarProjection, which lays out the sidebar's groups and its keyboard
-// shortcuts, the sidebar order store, nudged so the sidebar lays itself out again, and
-// buildSidebarShortcutSections, which numbers the shortcuts again once Waiting and Idle are split off.
-// Breaks if Paseo renames either or Metro stops keeping modules in a Map; switch to an SDK call
-// once one exists.
-export function findSidebarModules(): SidebarModules {
+// shortcut: the plugin SDK has no sidebar API, so this plugin finds the app's own modules among
+// those Metro has loaded. Breaks if Metro stops keeping modules in a Map; switch to SDK calls once
+// they exist.
+/** Metro's module registry, the live Map, so it can be searched again as the app loads more. */
+export function metroModules(): MetroModules {
   const metroRequire = (globalThis as { __r?: (id: unknown) => unknown }).__r;
   if (typeof metroRequire !== "function") throw new Error("Metro runtime not found");
   // Metro's require starts with modules.get(id), so asking for an id no module has hands over the
   // registry Map. The probe answers as an already loaded module, so Metro runs no module code and
   // takes no error path, which would be fatal in a release build on iOS and Android.
-  const probe = Symbol("hide-workspaces");
+  const probe = Symbol("tweaks");
   const get = Map.prototype.get;
   let modules: Map<unknown, MetroModule> | undefined;
   Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
@@ -81,13 +80,27 @@ export function findSidebarModules(): SidebarModules {
     Map.prototype.get = get;
   }
   if (!modules) throw new Error("Metro module registry not found");
+  return modules;
+}
+
+/** The exports of the modules the app has run. Only those: requiring another one would run its code early. */
+export function* loadedExports(modules: MetroModules): Generator<Record<string, unknown>> {
+  for (const module of modules.values()) {
+    const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
+    if (exports) yield exports;
+  }
+}
+
+/**
+ * buildSidebarProjection, which lays out the sidebar's groups and its keyboard shortcuts, the sidebar
+ * order store, nudged so the sidebar lays itself out again, and buildSidebarShortcutSections, which
+ * numbers the shortcuts again once Waiting and Idle are split off. Breaks if Paseo renames them.
+ */
+export function findSidebarModules(modules: MetroModules = metroModules()): SidebarModules {
   let projection: ProjectionModule | undefined;
   let orderStore: OrderStore | undefined;
   let buildShortcuts: BuildShortcuts | undefined;
-  // Only modules that have already run: requiring another one would run its code early.
-  for (const module of modules.values()) {
-    const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
-    if (!exports) continue;
+  for (const exports of loadedExports(modules)) {
     if (typeof exports.buildSidebarProjection === "function") projection = exports as unknown as ProjectionModule;
     const store = exports.useSidebarOrderStore as Partial<OrderStore> | undefined;
     if (typeof store?.setState === "function" && Array.isArray(store.getState?.().pinnedWorkspaceOrder)) {

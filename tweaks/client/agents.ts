@@ -30,7 +30,7 @@ const PARENT_LABEL = "paseo.parent-agent-id";
 // The app loads a copy of this plugin for every host that has it, all in one JavaScript realm. Each
 // copy keeps its own host's agents here, so a subagent on another host counts too. Bump the version
 // when this shape changes.
-const SHARED = Symbol.for("ragokan/paseo-plugins/hide-workspaces/agents@1");
+const SHARED = Symbol.for("ragokan/paseo-plugins/tweaks/agents@1");
 function shared(): Shared {
   const realm = globalThis as unknown as Record<symbol, Shared | undefined>;
   return (realm[SHARED] ??= { hosts: new Set(), waiting: new Set(), listeners: new Set() });
@@ -110,7 +110,7 @@ export function joinAgents(client: PluginClientContext): () => void {
         },
       });
     })
-    .catch((error: unknown) => console.warn("[hide-workspaces] cannot follow this host's agents; Waiting leaves them out", error));
+    .catch((error: unknown) => console.warn("[tweaks] cannot follow this host's agents; Waiting leaves them out", error));
   return () => {
     stopped = true;
     release?.().catch(() => {});

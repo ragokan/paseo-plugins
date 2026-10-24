@@ -1,10 +1,10 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { gate } from "./server/gate";
 import continueAfterError from "./server/plugins/continue-after-error/index";
-import { registerWorkspaceSettings } from "./server/plugins/hide-workspaces/index";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
 import statusLabels from "./server/plugins/status-labels/index";
+import { registerWorkspaceSettings } from "./server/plugins/tweaks/index";
 import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 
 export default function contribute(server: PluginServerContext) {
@@ -30,7 +30,7 @@ export default function contribute(server: PluginServerContext) {
         return features["continue-after-error"];
       },
     }),
-    // Registers nothing, so needs no gate; while it is off it takes its labels off. It follows hide-workspaces'
+    // Registers nothing, so needs no gate; while it is off it takes its labels off. It follows the tweaks'
     // marks, so a workspace marked as done leaves Idle.
     statusLabels(server, {
       enabled: () => features["status-labels"],

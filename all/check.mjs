@@ -151,7 +151,7 @@ assert.deepEqual([...themesOn], ["ragdevbox/monokai"], "another copy takes over 
 await leaveDevbox();
 assert.deepEqual([...themesOn], [], "the last copy to stop takes it down");
 
-// What every copy adds for itself while an app plugin is on, like hide-workspaces' Mark as done.
+// What every copy adds for itself while an app plugin is on, like the tweaks' Mark as done.
 const commands = new Set();
 const whileThemes = (host) => whileAppFeature("themes", () => (commands.add(host), () => commands.delete(host)));
 const stopMini = whileThemes("ragmini");

@@ -1,6 +1,6 @@
 /**
  * The label for each group of the sidebar grouped by status, with its color: Paseo's statuses, then
- * the groups hide-workspaces splits off Done. Paseo's label colors have no gray, so Done is indigo.
+ * the groups the tweaks plugin splits off Done. Paseo's label colors have no gray, so Done is indigo.
  */
 export const LABELS = {
   // Paseo's Needs input: an agent asks a question or waits for a permission.
@@ -20,7 +20,7 @@ export type LabelColor = (typeof LABELS)[LabelName];
 
 const BY_STATUS: Readonly<Record<string, LabelName>> = { needs_input: "Input", failed: "Failed", running: "Working", attention: "Review" };
 
-/** How long a workspace Paseo puts in Done waits in Idle first, as in hide-workspaces. */
+/** How long a workspace Paseo puts in Done waits in Idle first, as in the tweaks plugin. */
 export const IDLE_FOR = 24 * 60 * 60 * 1000;
 
 // The fields of Paseo's workspace and agent snapshots this plugin reads.
@@ -37,7 +37,7 @@ export interface Agent {
   working: boolean;
 }
 
-/** hide-workspaces' marks: a workspace marked as done in Idle, by id, with when it entered Done. */
+/** The tweaks plugin's marks: a workspace marked as done in Idle, by id, with when it entered Done. */
 export type DoneMarks = Readonly<Record<string, number>>;
 /** When each workspace this plugin has seen entered Done, by id; null while it is in another status. */
 export type DoneSince = Readonly<Record<string, number | null>>;
@@ -59,7 +59,7 @@ const time = (iso: string | null | undefined) => (iso ? Date.parse(iso) : NaN);
  * from its agents' last update, so a daemon restart or a reopened chat moves it later, while the app's
  * connection keeps the time it saw. So this keeps the earliest time seen for a stay in Done, which ends
  * when the workspace leaves Done or gets a message from you. A workspace it has never seen starts from
- * hide-workspaces' mark, the app's time, if it has one for this stay.
+ * the tweaks plugin's mark, the app's time, if it has one for this stay.
  */
 export function doneSince(previous: DoneSince, workspaces: Iterable<Workspace>, marks: DoneMarks): Record<string, number | null> {
   const next: Record<string, number | null> = {};

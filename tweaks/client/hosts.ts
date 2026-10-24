@@ -23,7 +23,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 // The app loads a copy of this plugin for every host that has it, all in one JavaScript realm. Each
 // copy keeps its own host's settings here, and the sidebar follows all of them. Bump the version
 // when this shape changes in a way older copies cannot share; they leave out fields added since.
-const SHARED = Symbol.for("ragokan/paseo-plugins/hide-workspaces/hosts@1");
+const SHARED = Symbol.for("ragokan/paseo-plugins/tweaks/hosts@1");
 function shared(): Shared {
   const realm = globalThis as unknown as Record<symbol, Shared | undefined>;
   return (realm[SHARED] ??= { hosts: new Set(), hidden: new Set(), done: new Set(), listeners: new Set() });
@@ -47,7 +47,7 @@ async function refresh(state: Shared, host: Host) {
   try {
     host.values = (await read(host)).values;
   } catch (error) {
-    console.warn("[hide-workspaces] could not read this host's workspace settings", error);
+    console.warn("[tweaks] could not read this host's workspace settings", error);
     return;
   }
   if (state.hosts.has(host)) publish(state);
@@ -70,7 +70,7 @@ export function joinWorkspaceSettings(client: PluginClientContext): () => void {
       },
     });
   } catch (error) {
-    console.warn("[hide-workspaces] cannot follow this host's workspace settings; reading them once", error);
+    console.warn("[tweaks] cannot follow this host's workspace settings; reading them once", error);
     void refresh(state, host);
   }
   return () => {

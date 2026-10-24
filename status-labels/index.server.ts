@@ -11,7 +11,7 @@ export interface StatusLabelsOptions {
   enabled?: () => boolean;
   /** Calls back when enabled() or the marks may have changed; returns a function that stops. */
   onChange?: (listener: () => void) => () => void;
-  /** hide-workspaces' workspaces marked as done in Idle. The all plugin passes its settings. */
+  /** The tweaks plugin's workspaces marked as done in Idle. The all plugin passes its settings. */
   doneMarks?: () => Promise<DoneMarks>;
 }
 

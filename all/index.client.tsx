@@ -3,8 +3,8 @@ import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/c
 import { joinAppFeatures, whileAppFeature } from "./client/app-features";
 import { FeatureSettings } from "./client/settings";
 import { createSwitches, type Contribution } from "./client/switches";
-import { joinWorkspaceSettings } from "./client/plugins/hide-workspaces/hosts";
-import { contributeEveryCopy, contributeSidebar as hideWorkspaces } from "./client/plugins/hide-workspaces/index";
+import { joinWorkspaceSettings } from "./client/plugins/tweaks/hosts";
+import { contributeApp as tweaks, contributeEveryCopy } from "./client/plugins/tweaks/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
 import mcpToggle from "./client/plugins/mcp-toggle/index";
@@ -15,10 +15,10 @@ import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type Hos
 declare const console: { warn(...args: unknown[]): void };
 
 const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
-  "hide-workspaces": hideWorkspaces,
   "mark-all-read": markAllRead,
   "merge-thinking": mergeThinking,
   themes,
+  tweaks,
 };
 const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "mcp-toggle": mcpToggle,
@@ -31,11 +31,11 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
 const hostSettings = hostFeatureSettings(false);
 
 export default function contribute(client: PluginClientContext) {
-  // Every copy brings its host's hidden workspaces and those marked as done, whichever copy runs hide-workspaces' sidebar patch.
+  // Every copy brings its host's hidden workspaces and those marked as done, whichever copy runs the tweaks' sidebar patch.
   const leaveWorkspaces = joinWorkspaceSettings(client);
   // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Mark as
   // done, and follows its own host's agents for Waiting.
-  const stopHideWorkspaces = whileAppFeature("hide-workspaces", () => contributeEveryCopy(client));
+  const stopTweaks = whileAppFeature("tweaks", () => contributeEveryCopy(client));
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -58,7 +58,7 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
-    stopHideWorkspaces();
+    stopTweaks();
     leaveWorkspaces();
   };
 }
