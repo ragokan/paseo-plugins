@@ -1,0 +1,8 @@
+{
+  "id": "status-labels",
+  "name": "Status labels",
+  "description": "Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done.",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}

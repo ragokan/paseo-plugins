@@ -25,6 +25,8 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "machine-status": machineStatus,
   // Daemon only: it resumes agents on its own host and adds nothing to the app.
   "continue-after-error": () => {},
+  // Daemon only: it labels its own host's workspaces, which the app shows like any label.
+  "status-labels": () => {},
 };
 const hostSettings = hostFeatureSettings(false);
 

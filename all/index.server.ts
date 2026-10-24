@@ -1,21 +1,24 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { gate } from "./server/gate";
 import continueAfterError from "./server/plugins/continue-after-error/index";
-import hideWorkspaces from "./server/plugins/hide-workspaces/index";
+import { registerWorkspaceSettings } from "./server/plugins/hide-workspaces/index";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
+import statusLabels from "./server/plugins/status-labels/index";
 import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 
 export default function contribute(server: PluginServerContext) {
   const linux = process.platform === "linux";
   const settings = server.registerSettings(hostFeatureSettings(linux));
-  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true };
+  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true, "status-labels": true };
   const update = (state: Awaited<ReturnType<typeof settings.read>>) => {
     if (state.status === "ready") features = state.values;
     else console.warn("[all] Features settings are unreadable; keeping the previous switches:", state.error);
   };
   const firstRead = settings.read().then(update, (error: unknown) => console.warn("[all] could not read the Features settings:", error));
   const unsubscribe = settings.subscribe(update);
+  // Only keeps the hidden workspaces and those marked as done in this host's settings; its switch is in the app.
+  const workspaces = registerWorkspaceSettings(server);
 
   const cleanups = [
     mcpToggle(gate(server, "mcp-toggle", () => features["mcp-toggle"])),
@@ -27,8 +30,23 @@ export default function contribute(server: PluginServerContext) {
         return features["continue-after-error"];
       },
     }),
-    // Only keeps the hidden workspaces and those marked as done in this host's settings; its switch is in the app.
-    hideWorkspaces(server),
+    // Registers nothing, so needs no gate; while it is off it takes its labels off. It follows hide-workspaces'
+    // marks, so a workspace marked as done leaves Idle.
+    statusLabels(server, {
+      enabled: () => features["status-labels"],
+      onChange: (listener) => {
+        const stopFeatures = settings.subscribe(() => listener());
+        const stopMarks = workspaces.subscribe(() => listener());
+        return () => {
+          void stopFeatures();
+          void stopMarks();
+        };
+      },
+      doneMarks: async () => {
+        const state = await workspaces.read();
+        return state.status === "ready" ? state.values.done : {};
+      },
+    }),
   ];
 
   return async () => {

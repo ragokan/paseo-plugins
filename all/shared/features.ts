@@ -24,6 +24,13 @@ export const FEATURES = [
     hint: "When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped",
     serverOnly: true,
   },
+  {
+    id: "status-labels",
+    scope: "host",
+    title: "Status labels",
+    hint: "Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done",
+    serverOnly: true,
+  },
 ] as const;
 
 type Feature = (typeof FEATURES)[number];
@@ -47,9 +54,10 @@ export function hostFeatureSettings(linux: boolean) {
       "mcp-toggle": z.boolean().default(true),
       "machine-status": z.boolean().default(linux),
       "continue-after-error": z.boolean().default(true),
+      "status-labels": z.boolean().default(true),
     }),
   });
 }
 
 /** What the app uses when it cannot read a host's switches. */
-export const DEFAULT_HOST_FEATURES: HostFeatures = { "mcp-toggle": true, "machine-status": false, "continue-after-error": true };
+export const DEFAULT_HOST_FEATURES: HostFeatures = { "mcp-toggle": true, "machine-status": false, "continue-after-error": true, "status-labels": true };

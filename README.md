@@ -10,6 +10,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux machine the daemon runs on. |
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
+| [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
 | [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
 
