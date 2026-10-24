@@ -4,6 +4,7 @@ import { splitIdle, type BuildShortcuts, type GroupingInput, type Projection } f
 
 declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
+declare const console: { warn(...args: unknown[]): void };
 
 // The fields of Paseo's SidebarProjectionInput this plugin reads or rewrites.
 export interface ProjectionInput {
@@ -30,12 +31,18 @@ export interface SidebarModules {
   // Missing if Paseo renames it; Idle's shortcuts then follow Paseo's own numbering.
   buildShortcuts?: BuildShortcuts;
 }
-// An entry in Metro's module registry.
+// An entry in Metro's module registry. Metro reads the factory when the app first requires the
+// module, runs it, then drops it.
 interface MetroModule {
   isInitialized?: boolean;
   publicModule?: { exports?: Record<string, unknown> };
+  factory?: unknown;
 }
 export type MetroModules = ReadonlyMap<unknown, MetroModule>;
+type ModuleListener = (exports: Record<string, unknown>) => void;
+// A factory that, once its module has run, hands the exports to every copy of this plugin listening.
+type Hook = ((...args: unknown[]) => unknown) & { original: (...args: unknown[]) => unknown; listeners: Set<ModuleListener> };
+const isHook = (factory: unknown): factory is Hook => typeof factory === "function" && "listeners" in factory;
 
 /**
  * Leaves the named groups, and those whose name starts with a digit, out of the sidebar with their chats,
@@ -89,6 +96,43 @@ export function* loadedExports(modules: MetroModules): Generator<Record<string, 
     const exports = module?.isInitialized ? module.publicModule?.exports : undefined;
     if (exports) yield exports;
   }
+}
+
+/**
+ * Calls listener with the exports of each module the app runs from now on, as it runs, before the
+ * code that required it uses them. It wraps the factories of the modules not run yet; the app loads
+ * this plugin once per host that has it, so loads share the wrappers, and the last one to stop puts
+ * the factories back. Returns a function that stops listening.
+ */
+export function onModuleRun(modules: MetroModules, listener: ModuleListener): () => void {
+  const existing = [...modules.values()].find((module) => isHook(module?.factory))?.factory as Hook | undefined;
+  const listeners = existing?.listeners ?? new Set<ModuleListener>();
+  for (const module of modules.values()) {
+    const original = module?.factory;
+    if (!module || module.isInitialized || typeof original !== "function" || isHook(original)) continue;
+    const hook = function (this: unknown, ...args: unknown[]) {
+      const result = original.apply(this, args);
+      const exports = module.publicModule?.exports;
+      for (const listen of [...listeners]) {
+        // A listener that fails leaves the module as it ran: throwing here would fail the app's require.
+        try {
+          if (exports) listen(exports);
+        } catch (error) {
+          console.warn("[tweaks]", error);
+        }
+      }
+      return result;
+    };
+    module.factory = Object.assign(hook, { original, listeners });
+  }
+  listeners.add(listener);
+  return () => {
+    if (!listeners.delete(listener) || listeners.size > 0) return;
+    for (const module of modules.values()) {
+      const factory = module?.factory;
+      if (isHook(factory) && factory.listeners === listeners) module.factory = factory.original;
+    }
+  };
 }
 
 /**

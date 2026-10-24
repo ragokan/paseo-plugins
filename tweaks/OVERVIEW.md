@@ -8,8 +8,8 @@ A workspace in Done whose agent waits on a subagent sits in a Waiting group abov
 
 On the desktop and web apps, Idle's group icon is a minus in a circle, in the yellow of an amber label; on iOS and Android it keeps Done's check.
 
-A host's name shows without the server icon in front of it, in the sidebar rows and wherever else Paseo shows a host's badge. A host set to show only its icon keeps it. In the sidebar rows the host comes first, before the folder, and the New workspace screen has the host picker before the project picker, and on the desktop and web apps shows the host's name without its status dot.
+A host's name shows without the server icon in front of it, in the sidebar rows and wherever else Paseo shows a host's badge. A host set to show only its icon keeps it. In the sidebar rows the host comes first, before the folder, and the New workspace screen has the host picker before the project picker.
 
 On the desktop and web apps, a label named Done is gray, like Paseo's Done group. Paseo's label colors have no gray, so the status-labels plugin gives Done indigo, which the iOS and Android apps show.
 
-The plugin SDK has no API for any of this yet, so the plugin finds the app's own functions among the app's loaded code and wraps them: the sidebar layout, the sidebar rows' subtitle, the host badge, the New workspace form and the command palette's order. Idle's icon, the status dot and the Done label are styles on the desktop and web apps' page. Any of it may stop working after a Paseo update. On iOS and Android it does the same, except those styles, but the page is not there, so hide workspaces from the desktop or web app.
+The plugin SDK has no API for any of this yet, so the plugin finds the app's own functions among the app's loaded code and wraps them: the sidebar layout, the sidebar rows' subtitle, the host badge, the New workspace form and the command palette's order. Idle's icon and the Done label are styles on the desktop and web apps' page. Any of it may stop working after a Paseo update. On iOS and Android it does the same, except those styles, but the page is not there, so hide workspaces from the desktop or web app.

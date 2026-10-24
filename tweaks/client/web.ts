@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import { HOST_STATUS_MARKER } from "./tweaks";
 
 // The DOM this module uses, on the desktop and web apps only.
 interface StyleElement {
@@ -20,23 +19,19 @@ const IDLE_CSS = `
 ${IDLE_ICON} { filter: sepia(1) saturate(1.6) brightness(0.75); }
 ${IDLE_ICON} path { d: path("M8 12h8") !important; }
 `;
-// New workspace's host picker shows the host's name alone, as the sidebar does: the box holding its
-// status dot goes, with the space it takes.
-const HOST_DOT_CSS = `[data-testid="host-picker-trigger"] div:has(> [data-testid="${HOST_STATUS_MARKER}"]) { display: none; }`;
 // The Done label in gray, like Paseo's Done group: Paseo's label colors have no gray, so status-labels
 // makes it indigo, and grayscale keeps its light and dark shades.
 const DONE_CSS = `[data-testid="workspace-label-chip-Done"] { filter: grayscale(1); }`;
 
 /**
- * Draws Idle's group icon as a minus in a circle, in the Idle label's yellow, hides New workspace's
- * host status dot, and grays the Done label. The app gives plugins no way to change these, so this
- * styles the desktop and web apps' page; iOS and Android keep Paseo's own. Returns a function that
- * takes it off.
+ * Draws Idle's group icon as a minus in a circle, in the Idle label's yellow, and grays the Done
+ * label. The app gives plugins no way to change these, so this styles the desktop and web apps' page;
+ * iOS and Android keep Paseo's own. Returns a function that takes it off.
  */
 export function stylePage(): () => void {
   if (Platform.OS !== "web") return () => {};
   const style = document.createElement("style");
-  style.textContent = [IDLE_CSS, HOST_DOT_CSS, DONE_CSS].join("\n");
+  style.textContent = [IDLE_CSS, DONE_CSS].join("\n");
   document.head.appendChild(style);
   return () => style.remove();
 }

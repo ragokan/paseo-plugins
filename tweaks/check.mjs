@@ -35,7 +35,7 @@ globalThis.window = { localStorage: globalThis.localStorage };
 // Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
 // The entry's React Native and its page are stubbed out, as on iOS, where the page is not added.
 const stubs = {
-  "react-native": { Platform: { OS: "ios" }, View: "View" },
+  "react-native": { Platform: { OS: "ios" } },
   "./client/screen": {},
 };
 const pluginModules = new Map();
@@ -606,7 +606,11 @@ const forms = {
   compact: React.createElement("View", { children: [field("new-workspace-project-picker-trigger"), hostPicker, field("isolation")] }),
   other: React.createElement("View", { children: [field("isolation"), field("new-workspace-project-picker-trigger")] }),
 };
-const formModule = { useNewWorkspaceForm: (layout) => forms[layout] };
+// The New workspace screen's module, defined as the app defines it, and run only when the screen opens.
+const FORM = Math.max(...moduleTexts.keys()) + 1;
+metroDefine((global, require, importDefault, importAll, module, exports) => {
+  exports.useNewWorkspaceForm = (layout) => forms[layout];
+}, FORM, []);
 const loaded = (exports) => ({ isInitialized: true, publicModule: { exports } });
 const store = { hosts: [{ serverId: BOX }], emitted: 0, emitHostList() { this.emitted += 1; } };
 globalThis.__paseoHostRuntimeStore = store;
@@ -629,8 +633,11 @@ assert.deepEqual(paletteOrder("done"), ["workspace:label:Done", "all:mark-as-don
 assert.deepEqual(paletteOrder("mark"), ["all:mark-all-read", "all:mark-as-done"]);
 assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"]);
 
-// The New workspace screen's module loads later than the rest: it is looked for again.
+// The New workspace screen's module runs later than the rest: its tweak lands as it runs, before the
+// screen draws with it.
 const registry = new Map([...metroModules(), ["badge", loaded(badgeModule)]]);
+const pendingModule = [...registry.values()].find((module) => !module.isInitialized && module !== registry.get(FORM));
+const pendingFactory = pendingModule.factory;
 const looks = [];
 globalThis.setTimeout = (callback, ms) => (looks.push({ callback, ms }), looks.length);
 const hostsBefore = store.hosts;
@@ -646,22 +653,17 @@ assert.equal(React.Children.toArray(named.props.children).length, 1, "the name w
 assert.equal(React.Children.toArray(named.props.children)[0].props.children, "ragdevbox");
 const iconOnly = badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: false } });
 assert.equal(iconOnly.props.children[0], icon, "a badge showing no name keeps its icon");
-assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop, "not loaded yet");
+assert.equal(registry.get(FORM).isInitialized, false, "not run yet");
 assert.equal(looks.length, 2);
-registry.set("form", loaded(formModule));
-looks.shift().callback();
+const formModule = metroRequire(FORM);
 const fields = (form) => React.Children.toArray(form.props.children).map((child) => JSON.stringify(child.props).match(/"testID":"([^"]+)"/)[1]);
 assert.deepEqual(fields(formModule.useNewWorkspaceForm("desktop")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
 assert.deepEqual(fields(formModule.useNewWorkspaceForm("compact")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
-// The host's status dot goes in a marker the desktop and web page hides, the trigger otherwise as it was.
+// The host picker moves as it is, its status dot kept.
 for (const layout of ["desktop", "compact"]) {
   const [host] = React.Children.toArray(formModule.useNewWorkspaceForm(layout).props.children);
   const picker = layout === "desktop" ? React.Children.only(host.props.children) : host;
-  const trigger = React.Children.only(picker.props.children);
-  assert.equal(trigger.props.testID, "host-picker-trigger");
-  assert.equal(trigger.props.value, "ragdevbox");
-  assert.equal(trigger.props.icon.props.testID, "tweaks-host-status");
-  assert.equal(React.Children.only(trigger.props.icon.props.children), dot);
+  assert.equal(React.Children.only(picker.props.children).props.icon, dot);
 }
 assert.equal(formModule.useNewWorkspaceForm("other"), forms.other, "fields it does not know stay put");
 // Mark as done comes first, and highlighted, whenever the query matches its title.
@@ -671,7 +673,8 @@ assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"], "a keyword match ke
 assert.deepEqual(paletteOrder(""), ["all:mark-all-read", "all:mark-as-done"], "an empty query keeps Paseo's order");
 const doneRows = palette.projectCommandCenterRows(palette.buildContributionSections(paletteItems, "done"), ROW_SIZES).rows;
 assert.deepEqual(doneRows.map((row) => row.kind === "section" ? `section:${row.title ?? ""}` : row.key), ["all:mark-as-done", "section:", "workspace:label:Done"], "no empty all section left behind");
-looks.shift().callback();
+assert.equal(pendingModule.factory, pendingFactory, "all found, the modules not run yet as they were");
+for (const look of looks.splice(0)) look.callback();
 assert.equal(looks.length, 0, "all found, no more looking");
 // The last copy to unload puts Paseo's own back.
 untweak();

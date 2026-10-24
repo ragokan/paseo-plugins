@@ -14,8 +14,8 @@ declare function clearTimeout(handle: unknown): void;
 
 /**
  * What changes the app itself: the sidebar patch, the host badges and the New workspace form, the
- * page styles for Idle's icon, New workspace's host and the Done label, and on desktop and web the
- * settings page that hides workspaces.
+ * page styles for Idle's icon and the Done label, and on desktop and web the settings page that
+ * hides workspaces.
  */
 export function contributeApp(client: PluginClientContext) {
   // The page is desktop and web only; the iOS and Android apps follow the hidden workspaces the hosts keep.
