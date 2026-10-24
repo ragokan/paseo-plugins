@@ -87,9 +87,45 @@ export function tweakNewWorkspaceForm(form: unknown): unknown {
   return cloneElement(form, undefined, marked, project, ...rest);
 }
 
+// The command palette's sections, as Paseo's buildContributionSections makes them: a result's score
+// has fieldRank 0 when the query matched its title, 1 when it matched only its keywords.
+interface PaletteResult {
+  id: string;
+  kind: string;
+  score?: { fieldRank: number };
+}
+interface PaletteSection {
+  id: string;
+  band: number;
+  rank: number;
+  title?: string;
+  results: PaletteResult[];
+  score?: unknown;
+}
+
+/**
+ * The command palette with Mark as done first when the query matches its title. Paseo ranks by
+ * match first, so "done" puts the Labels › Done item, an exact match, above it, and plugin
+ * commands below every built-in group besides. It moves into a section of its own that sorts
+ * first, and the palette highlights it.
+ */
+export function markAsDoneFirst(sections: readonly PaletteSection[]): PaletteSection[] {
+  for (const [index, section] of sections.entries()) {
+    const result = section.results.find(
+      (entry) => entry.kind === "contribution" && entry.id.endsWith(":mark-as-done") && entry.score?.fieldRank === 0,
+    );
+    if (!result) continue;
+    const lead: PaletteSection = { id: `${section.id}:mark-as-done`, band: -1, rank: -1, results: [result], score: result.score };
+    const rest = { ...section, results: section.results.filter((entry) => entry !== result) };
+    return [lead, ...sections.slice(0, index), rest, ...sections.slice(index + 1)];
+  }
+  return [...sections];
+}
+
 type SelectMetaRowItems = (input: unknown) => MetaItem[];
 type HostBadge = (props: { badge: { showLabel: boolean } }) => unknown;
 type UseNewWorkspaceForm = (input: unknown) => unknown;
+type ProjectCommandCenterRows = (sections: PaletteSection[], sizes: unknown) => unknown;
 
 // What each tweak wraps: the module that exports the function, found by its export.
 const TWEAKS = [
@@ -118,6 +154,17 @@ const TWEAKS = [
     wrap: (original: UseNewWorkspaceForm) =>
       function useNewWorkspaceForm(input: unknown) {
         return tweakNewWorkspaceForm(original(input));
+      },
+    rows: false,
+  },
+  {
+    // The command palette: Mark as done before the label of the same name. Paseo calls it on every query.
+    find: (exports: Record<string, unknown>) =>
+      typeof exports.projectCommandCenterRows === "function" && typeof exports.buildContributionSections === "function",
+    name: "projectCommandCenterRows",
+    wrap: (original: ProjectCommandCenterRows) =>
+      function projectCommandCenterRows(sections: PaletteSection[], sizes: unknown) {
+        return original(markAsDoneFirst(sections), sizes);
       },
     rows: false,
   },

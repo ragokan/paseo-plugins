@@ -611,6 +611,24 @@ const loaded = (exports) => ({ isInitialized: true, publicModule: { exports } })
 const store = { hosts: [{ serverId: BOX }], emitted: 0, emitHostList() { this.emitted += 1; } };
 globalThis.__paseoHostRuntimeStore = store;
 
+// The command palette as Paseo builds it, typing "done" in a workspace: the Labels › Done choice
+// and the commands the all plugin adds.
+const palette = metroRequire(idOf(".projectCommandCenterRows=function"));
+const projectCommandCenterRows = palette.projectCommandCenterRows;
+const paletteItem = (id, group, groupRank, rank, keywords, presentation, visibility = "always") =>
+  ({ id, group, groupRank, rank, keywords, visibility, run() {}, presentation });
+const paletteItems = [
+  paletteItem("workspace:label:Done", "workspace", -1, 30, ["label", "tag", "Done"], { kind: "choice", path: ["Labels", "Done"] }, "query"),
+  paletteItem("all:mark-all-read", "plugin:all", 5, 0, ["read"], { kind: "action", title: "Mark all as read", sectionTitle: "all" }),
+  paletteItem("all:mark-as-done", "plugin:all", 5, 1, ["idle", "done", "status", "sidebar"], { kind: "action", title: "Mark as done", sectionTitle: "all" }),
+];
+const ROW_SIZES = { sectionDivider: 1, sectionTitle: 20, singleLineRow: 30, twoLineRow: 40 };
+const paletteOrder = (query) =>
+  palette.projectCommandCenterRows(palette.buildContributionSections(paletteItems, query), ROW_SIZES).selectableResults.map((result) => result.id);
+assert.deepEqual(paletteOrder("done"), ["workspace:label:Done", "all:mark-as-done"], "Paseo puts the exact label match first");
+assert.deepEqual(paletteOrder("mark"), ["all:mark-all-read", "all:mark-as-done"]);
+assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"]);
+
 // The New workspace screen's module loads later than the rest: it is looked for again.
 const registry = new Map([...metroModules(), ["badge", loaded(badgeModule)]]);
 const looks = [];
@@ -646,6 +664,13 @@ for (const layout of ["desktop", "compact"]) {
   assert.equal(React.Children.only(trigger.props.icon.props.children), dot);
 }
 assert.equal(formModule.useNewWorkspaceForm("other"), forms.other, "fields it does not know stay put");
+// Mark as done comes first, and highlighted, whenever the query matches its title.
+assert.deepEqual(paletteOrder("done"), ["all:mark-as-done", "workspace:label:Done"]);
+assert.deepEqual(paletteOrder("mark"), ["all:mark-as-done", "all:mark-all-read"]);
+assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"], "a keyword match keeps Paseo's order");
+assert.deepEqual(paletteOrder(""), ["all:mark-all-read", "all:mark-as-done"], "an empty query keeps Paseo's order");
+const doneRows = palette.projectCommandCenterRows(palette.buildContributionSections(paletteItems, "done"), ROW_SIZES).rows;
+assert.deepEqual(doneRows.map((row) => row.kind === "section" ? `section:${row.title ?? ""}` : row.key), ["all:mark-as-done", "section:", "workspace:label:Done"], "no empty all section left behind");
 looks.shift().callback();
 assert.equal(looks.length, 0, "all found, no more looking");
 // The last copy to unload puts Paseo's own back.
@@ -655,6 +680,8 @@ untweakSecondHost();
 assert.equal(metaRow.selectMetaRowItems, selectMetaRowItems);
 assert.equal(badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: true } }).props.children.length, 2);
 assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop);
+assert.equal(palette.projectCommandCenterRows, projectCommandCenterRows);
+assert.deepEqual(paletteOrder("done"), ["workspace:label:Done", "all:mark-as-done"]);
 globalThis.setTimeout = realSetTimeout;
 delete globalThis.__paseoHostRuntimeStore;
-console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, and the tweaks in ${bundlePath}`);
+console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, Mark as done first, and the tweaks in ${bundlePath}`);
