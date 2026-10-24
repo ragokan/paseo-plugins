@@ -1,11 +1,13 @@
-// Runs the real handlers against this Linux machine. Every process it signals is one it started.
+// Runs the real handlers against this Linux or macOS machine. Every process it signals is one it started.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
+import os from "node:os";
 import { test } from "node:test";
 
-const skip = process.platform !== "linux" && "needs Linux";
+const mac = process.platform === "darwin";
+const skip = !mac && process.platform !== "linux" && "needs Linux or macOS";
 const { readMetricsHandler, resetHistory } = await import("./metrics.ts");
 const { killProcessHandler, listProcessesHandler } = await import("./processes.ts");
 const { readServicesHandler } = await import("./services.ts");
@@ -19,17 +21,18 @@ function start(code) {
   return child;
 }
 
-test("metrics match /proc/meminfo and grow a history", { skip }, async () => {
+test("metrics match the system's own memory total and grow a history", { skip }, async () => {
   resetHistory();
   const first = await readMetricsHandler();
   const second = await readMetricsHandler();
-  const total = Number(/^MemTotal:\s+(\d+)/m.exec(readFileSync("/proc/meminfo", "utf8"))[1]) * 1024;
+  const total = mac ? os.totalmem() : Number(/^MemTotal:\s+(\d+)/m.exec(readFileSync("/proc/meminfo", "utf8"))[1]) * 1024;
+  assert.equal(first.os, mac ? "macos" : "linux");
   assert.equal(first.memory.totalBytes, total);
   assert.ok(first.memory.usedPercent > 0 && first.memory.usedPercent < 100);
   assert.ok(first.cpu.busyPercent >= 0 && first.cpu.busyPercent <= 100);
   assert.ok(first.disk.totalBytes > 0 && first.disk.mountedOn.startsWith("/"));
   assert.equal(second.history.length, 2);
-  const online = readFileSync("/proc/stat", "utf8").split("\n").filter((line) => /^cpu\d+ /.test(line)).length;
+  const online = mac ? os.cpus().length : readFileSync("/proc/stat", "utf8").split("\n").filter((line) => /^cpu\d+ /.test(line)).length;
   assert.equal(second.cpu.perCore.length, online);
   const split = second.cpu.userPercent + second.cpu.systemPercent + second.cpu.stealPercent;
   assert.ok(Math.abs(split - second.cpu.busyPercent) < 0.01, `${split} vs ${second.cpu.busyPercent}`);

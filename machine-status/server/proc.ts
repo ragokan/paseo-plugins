@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
+import os from "node:os";
+import { CLOCK_TICKS, macProcessRunning, macUidOf, readMacCwds, readMacProcTable } from "./mac.ts";
 
 /**
- * Linux process table straight from /proc. Reading a few hundred small procfs
- * files costs a few milliseconds, which is far cheaper than starting `ps`, and
- * the plugin runs in its own process, so the synchronous reads block nothing else.
+ * The process table. On Linux it comes straight from /proc: reading a few
+ * hundred small procfs files costs a few milliseconds, far cheaper than starting
+ * `ps`, and the plugin runs in its own process, so the synchronous reads block
+ * nothing else. macOS has no /proc, so there it is one `ps` call (mac.ts).
  */
+const MAC = process.platform === "darwin";
 
 export interface RawProcess {
   pid: number;
@@ -24,6 +28,8 @@ let constants: { clockTicks: number; pageSize: number } | null = null;
 /** Clock ticks per second and page size, asked once; arm64 kernels can use 16 KiB or 64 KiB pages. */
 export function procConstants(): { clockTicks: number; pageSize: number } {
   if (constants) return constants;
+  // ps reports CPU time in centiseconds; the page size is unused there.
+  if (MAC) return (constants = { clockTicks: CLOCK_TICKS, pageSize: 16_384 });
   const ask = (name: string, fallback: number): number => {
     try {
       const value = Number(execFileSync("getconf", [name], { encoding: "utf8", timeout: 2_000 }).trim());
@@ -62,7 +68,11 @@ export function parseProcStat(raw: string, pageSize: number): RawProcess | null 
   };
 }
 
-export function readProcTable(): RawProcess[] {
+export async function readProcTable(): Promise<RawProcess[]> {
+  return MAC ? readMacProcTable() : readLinuxProcTable();
+}
+
+function readLinuxProcTable(): RawProcess[] {
   const { pageSize } = procConstants();
   const table: RawProcess[] = [];
   for (const entry of readdirSync("/proc")) {
@@ -94,6 +104,8 @@ export function commandFrom(rawArgv0: string, exe: string | null, comm: string):
 }
 
 export function commandOf(pid: number, comm: string): string {
+  // ps already gave macOS's argv[0], which is all the table holds there.
+  if (MAC) return commandFrom(comm, null, comm);
   let argv0 = "";
   try {
     const raw = readFileSync(`/proc/${pid}/cmdline`, "utf8");
@@ -111,16 +123,44 @@ export function commandOf(pid: number, comm: string): string {
   return commandFrom(argv0, exe, comm);
 }
 
-/** Empty when the directory is not readable, which it is not for other users' processes. */
-export function cwdOf(pid: number): string {
+/** Each process's working directory; missing when it is not readable, as other users' are not. */
+export async function cwdsOf(pids: readonly number[]): Promise<Map<number, string>> {
+  if (MAC) return readMacCwds(pids);
+  const cwds = new Map<number, string>();
+  for (const pid of pids) {
+    try {
+      cwds.set(pid, readlinkSync(`/proc/${pid}/cwd`));
+    } catch {
+      // Exited, or another user's.
+    }
+  }
+  return cwds;
+}
+
+/** A zombie has already exited and only waits for its parent to collect it. */
+export async function isRunning(pid: number): Promise<boolean> {
+  if (MAC) return macProcessRunning(pid);
   try {
-    return readlinkSync(`/proc/${pid}/cwd`);
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return raw.slice(raw.lastIndexOf(")") + 2, raw.lastIndexOf(")") + 3) !== "Z";
   } catch {
-    return "";
+    return false;
+  }
+}
+
+/** The real user id; null once the process is gone. */
+export async function uidOf(pid: number): Promise<number | null> {
+  if (MAC) return macUidOf(pid);
+  try {
+    const match = /^Uid:\s+(\d+)/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"));
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
   }
 }
 
 export function uptimeSeconds(): number {
+  if (MAC) return os.uptime();
   try {
     return Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) || 0;
   } catch {
@@ -201,10 +241,10 @@ async function measure(): Promise<{ table: RawProcess[]; cpu: Map<number, number
   const now = Date.now();
   let previous = last;
   if (!previous || now - previous.at > MAX_WINDOW_MS) {
-    previous = { at: Date.now(), table: readProcTable() };
+    previous = { at: Date.now(), table: await readProcTable() };
     await wait(FIRST_WINDOW_MS);
   }
-  const current: Sample = { at: Date.now(), table: readProcTable() };
+  const current: Sample = { at: Date.now(), table: await readProcTable() };
   last = current;
   lastResult = { at: current.at, table: current.table, cpu: cpuBetween(previous, current, procConstants().clockTicks) };
   return lastResult;

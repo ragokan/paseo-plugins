@@ -4,6 +4,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+// Dates and numbers in the C locale's words, whatever language the daemon runs in.
+const C_LOCALE = { ...process.env, LC_ALL: "C" };
+
 /**
  * Runs a binary directly, never through a shell. Paths and PIDs flow into these
  * calls, and argv-style invocation removes any chance of shell interpretation.
@@ -13,6 +16,7 @@ export async function run(file: string, args: string[], timeoutMs = 5_000): Prom
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
     encoding: "utf8",
+    env: C_LOCALE,
   });
   return stdout;
 }
@@ -23,6 +27,19 @@ export async function tryRun(file: string, args: string[], timeoutMs = 5_000): P
     return await run(file, args, timeoutMs);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Returns stdout even when the command exits non-zero: lsof exits 1 when one of
+ * the PIDs it was asked about has gone, and still lists the others.
+ */
+export async function runTolerant(file: string, args: string[], timeoutMs = 5_000): Promise<string> {
+  try {
+    return await run(file, args, timeoutMs);
+  } catch (error) {
+    const stdout = (error as { stdout?: unknown }).stdout;
+    return typeof stdout === "string" ? stdout : "";
   }
 }
 

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import type { explainProcess } from "../shared/explain.ts";
@@ -6,10 +5,11 @@ import { classify, type ProcessEvidence } from "./explain-rules.ts";
 import { collectMetrics } from "./metrics.ts";
 import {
   commandOf,
-  cwdOf,
+  cwdsOf,
   formatElapsed,
   procConstants,
   sampleProcesses,
+  uidOf,
   uptimeSeconds,
   type RawProcess,
 } from "./proc.ts";
@@ -22,19 +22,12 @@ function childrenOf<T extends { ppid: number }>(pid: number, table: readonly T[]
   return table.filter((entry) => entry.ppid === pid);
 }
 
-/** The real user id from `/proc/<pid>/status`; null once the process is gone. */
-function uidOf(pid: number): number | null {
-  try {
-    const match = /^Uid:\s+(\d+)/m.exec(readFileSync(`/proc/${pid}/status`, "utf8"));
-    return match ? Number(match[1]) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Below 1000 is a system account on Debian, Ubuntu, Fedora and Arch alike. */
-const FIRST_LOGIN_UID = 1000;
-const SYSTEM_PATH = /^(\/usr)?\/(sbin|lib|libexec)\//;
+const MAC = process.platform === "darwin";
+/** Below 1000 is a system account on Debian, Ubuntu, Fedora and Arch alike; macOS starts people at 501. */
+const FIRST_LOGIN_UID = MAC ? 501 : 1000;
+const SYSTEM_PATH = MAC
+  ? /^\/(System|Library\/Apple|usr\/(sbin|libexec)|sbin)\//
+  : /^(\/usr)?\/(sbin|lib|libexec)\//;
 
 export async function explainProcessHandler(
   { pid }: { pid: number },
@@ -62,7 +55,7 @@ export async function explainProcessHandler(
   const [metrics, services] = await Promise.all([collectMetrics(), readServicesHandler({}, context)]);
 
   const command = commandOf(pid, self.comm);
-  const uid = uidOf(pid);
+  const [uid, cwds] = await Promise.all([uidOf(pid), cwdsOf([pid])]);
   const elapsedSeconds = Math.max(0, uptimeSeconds() - self.startTicks / procConstants().clockTicks);
   const children = childrenOf(pid, table);
   const childPids = new Set([pid, ...children.map((child) => child.pid)]);
@@ -76,7 +69,7 @@ export async function explainProcessHandler(
     memoryBytes: self.rssBytes,
     elapsed: formatElapsed(elapsedSeconds),
     elapsedSeconds,
-    cwd: cwdOf(pid) || null,
+    cwd: cwds.get(pid) || null,
     parents: [...ancestorsOf(pid, table)]
       .filter((entry) => entry !== pid)
       .map((entry) => {

@@ -14,14 +14,14 @@ export const CpuSchema = z.object({
   loadAvg15: z.number(),
   /** loadAvg1 relative to core count, so 100 means "one runnable thread per core". */
   loadPercent: z.number(),
-  /** Share of all cores busy since the previous read, from /proc/stat: what `top` calls CPU use. */
+  /** Share of all cores busy since the previous read: what `top` calls CPU use. */
   busyPercent: z.number(),
   /** busyPercent split by who used it: user + system + steal = busy. */
   userPercent: z.number(),
   systemPercent: z.number(),
-  /** CPU time the hypervisor gave to other guests; only VMs report it. */
+  /** CPU time the hypervisor gave to other guests; only Linux VMs report it. */
   stealPercent: z.number(),
-  /** Idle time with disk I/O outstanding. Not part of busy. */
+  /** Idle time with disk I/O outstanding, on Linux. Not part of busy. */
   iowaitPercent: z.number(),
   /** Busy share of each online core over the same interval, by kernel CPU number. */
   perCore: z.array(z.object({ id: z.number(), busyPercent: z.number() })),
@@ -31,21 +31,25 @@ export const CpuSchema = z.object({
 
 export const MemorySchema = z.object({
   totalBytes: z.number(),
-  /** The kernel's MemAvailable: free memory plus what it can reclaim without swapping. */
+  /** Linux: the kernel's MemAvailable, free memory plus what it can reclaim without swapping. macOS: total − used. */
   availableBytes: z.number(),
-  /** totalBytes − availableBytes. */
+  /** Linux: totalBytes − availableBytes. macOS: app, wired and compressed memory, as Activity Monitor counts it. */
   usedBytes: z.number(),
-  /** Anonymous memory processes hold: heaps and stacks. */
+  /** Anonymous memory processes hold: heaps and stacks. macOS leaves out what apps marked purgeable. */
   appBytes: z.number(),
-  /** tmpfs files and shared memory. `free` counts it as cache, but only swap can reclaim it. */
+  /** Linux: tmpfs files and shared memory. `free` counts it as cache, but only swap can reclaim it. 0 on macOS. */
   sharedBytes: z.number(),
-  /** Kernel memory that cannot be reclaimed: unreclaimable slab, kernel stacks and page tables. */
+  /** Memory the kernel holds that cannot be reclaimed. Linux: unreclaimable slab, kernel stacks and page tables. macOS: wired memory. */
   kernelBytes: z.number(),
-  /** Page cache and reclaimable slab, minus shared memory: what the kernel drops on demand. */
+  /** macOS: memory the compressor holds. 0 on Linux. */
+  compressedBytes: z.number(),
+  /** Linux: page cache and reclaimable slab, minus shared memory. macOS: cached files and purgeable memory. What the system drops on demand. */
   cachedBytes: z.number(),
   usedPercent: z.number(),
-  /** PSI: share of the last 10 s in which some task stalled on memory; null without PSI. */
+  /** Linux PSI: share of the last 10 s in which some task stalled on memory; null without PSI and on macOS. */
   stallPercent: z.number().nullable(),
+  /** macOS's memory pressure, as Activity Monitor colors it; null on Linux. */
+  pressure: z.enum(["normal", "warning", "critical"]).nullable(),
 });
 
 export const SwapSchema = z.object({
@@ -74,7 +78,10 @@ export const PowerSchema = z.object({
 });
 
 export const ThermalSchema = z.object({
-  /** From the hottest zone's own trip points; `unknown` when it has none or no zone exists. */
+  /**
+   * Linux: from the hottest zone's own trip points; `unknown` when it has none or no zone exists.
+   * macOS: from pmset, without a temperature.
+   */
   level: z.enum(["nominal", "fair", "serious", "critical", "unknown"]),
   celsius: z.number().nullable(),
   zone: z.string().nullable(),
@@ -88,11 +95,14 @@ export const HistorySampleSchema = z.object({
   appBytes: z.number(),
   sharedBytes: z.number(),
   kernelBytes: z.number(),
+  compressedBytes: z.number(),
   swapUsedBytes: z.number(),
 });
 
 export const MetricsSchema = z.object({
   collectedAt: z.string(),
+  /** Which system the numbers come from; the screen names some of them differently. */
+  os: z.enum(["linux", "macos"]),
   hostname: z.string(),
   platform: z.string(),
   uptimeSeconds: z.number(),

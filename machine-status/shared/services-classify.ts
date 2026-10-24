@@ -23,8 +23,9 @@ export function scopeOf(address: string): "public" | "lan" | "local" {
 }
 
 /**
- * ss writes `0.0.0.0:22`, `*:22`, `[::1]:631` and `127.0.0.53%lo:53`. The port
- * is after the last colon; brackets and the `%interface` suffix are dropped.
+ * ss writes `0.0.0.0:22`, `*:22`, `[::1]:631` and `127.0.0.53%lo:53`, and macOS's
+ * lsof the same shapes. The port is after the last colon; brackets and the
+ * `%interface` suffix are dropped.
  */
 export function parseSocketAddress(field: string): { address: string; port: number } | null {
   const index = field.lastIndexOf(":");
@@ -49,8 +50,11 @@ export function executableName(command: string): string {
     : withoutVersion;
 }
 
-/** Paths the distribution owns. Nothing under these is development work. */
-const SYSTEM_PREFIXES = ["/usr/sbin/", "/sbin/", "/usr/lib/", "/lib/", "/usr/libexec/", "["];
+/** Paths the distribution, or macOS, owns. Nothing under these is development work. */
+const SYSTEM_PREFIXES = [
+  "/usr/sbin/", "/sbin/", "/usr/lib/", "/lib/", "/usr/libexec/", "[",
+  "/System/", "/Library/Apple/", "/Library/PrivilegedHelperTools/",
+];
 
 /** Runtimes and services a developer actually starts. */
 const DEV_RUNTIMES = new Set([
@@ -85,11 +89,12 @@ export function classifyRelevance({ kind, command, owner, home }: RelevanceInput
   // Runtimes first: Debian installs PostgreSQL under /usr/lib/postgresql/.
   const name = executableName(command);
   if (DEV_RUNTIMES.has(name)) return "dev";
-  if (/^docker/.test(name)) return "dev";
+  if (/^docker|^com\.docker/.test(name)) return "dev";
   if (SYSTEM_PREFIXES.some((prefix) => command.startsWith(prefix))) return "system";
 
-  // Anything the user installed or built under their own home.
-  if (home.length > 0 && command.startsWith(`${home}/`)) return "dev";
+  // Anything the user installed or built under their own home, except macOS's
+  // Library tree, where it keeps per-user daemons.
+  if (home.length > 0 && command.startsWith(`${home}/`) && !command.startsWith(`${home}/Library/`)) return "dev";
   return "system";
 }
 
@@ -108,11 +113,13 @@ const NAMES: readonly (readonly [RegExp, string])[] = [
   [/^mongod$/i, "MongoDB"],
   [/^sshd$/i, "OpenSSH"],
   [/^tailscaled?$/i, "Tailscale"],
-  [/^docker/i, "Docker"],
+  [/^com\.docke|^docker/i, "Docker"],
   [/^esbuild$/i, "esbuild"],
   [/^systemd-resolve/i, "systemd-resolved"],
   [/^avahi-daemon/i, "Avahi (mDNS)"],
   [/^cupsd$/i, "CUPS printing"],
+  [/^ControlCenter$/i, "Control Center"],
+  [/^rapportd$/i, "Handoff (rapportd)"],
   [/^kubectl/i, "kubectl port-forward"],
 ];
 

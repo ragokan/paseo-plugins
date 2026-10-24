@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import * as ui from "@getpaseo/plugin/client/ui";
 import type { ComponentType, FunctionComponent } from "react";
+import { useReportScreen } from "./viewing.ts";
 
 /**
  * Paseo 0.11 replaced surfaces with screens: `addScreen`, `addSidebarHeaderItem`
@@ -87,7 +88,10 @@ export function registerMachineScreen(
   client.addSidebarItem({ id: SCREEN_ID, title: TITLE, icon: ICON, surface: SCREEN_ID });
 }
 
-function MachineSidebarItem({ currentScreen, openScreen }: SidebarItemProps) {
+function MachineSidebarItem({ host, currentScreen, openScreen }: SidebarItemProps) {
+  const open = currentScreen?.screenId === SCREEN_ID;
+  // The screen polls only while this says it is the current route; see viewing.ts.
+  useReportScreen(host.id, open);
   // Read off the namespace: the 0.8–0.10 ui runtime has no SidebarRow, and the
   // item renders nothing rather than crash.
   const SidebarRow = (ui as { SidebarRow?: SidebarRowComponent }).SidebarRow;
@@ -95,7 +99,7 @@ function MachineSidebarItem({ currentScreen, openScreen }: SidebarItemProps) {
   return (
     <SidebarRow
       icon={ICON}
-      active={currentScreen?.screenId === SCREEN_ID}
+      active={open}
       onPress={() => openScreen({ screenId: SCREEN_ID })}
     />
   );

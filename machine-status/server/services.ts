@@ -3,7 +3,8 @@ import path from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import { binary, describeError, run, tryRun } from "./exec.ts";
-import { cwdOf, commandOf, readProcTable, type RawProcess } from "./proc.ts";
+import { cwdsOf, commandOf, readProcTable, type RawProcess } from "./proc.ts";
+import { readMacListeners } from "./mac.ts";
 import { ancestorsOf } from "./processes.ts";
 import {
   classifyRelevance,
@@ -208,14 +209,18 @@ export async function readServicesHandler(
   _input: unknown,
   context: PluginHandlerContext,
 ): Promise<Output> {
-  if (process.platform !== "linux") {
-    throw new Error(`machine-status inspects ports through Linux's ss; this daemon runs on ${process.platform}.`);
+  const mac = process.platform === "darwin";
+  if (!mac && process.platform !== "linux") {
+    throw new Error(`machine-status inspects ports on Linux and macOS; this daemon runs on ${process.platform}.`);
   }
 
   const notes: string[] = [];
 
-  const [ssRaw, dockerRaw, agentList] = await Promise.all([
-    run(binary("ss"), ["-H", "-tulnp"], 8_000),
+  const [{ listeners, othersHidden }, dockerRaw, agentList] = await Promise.all([
+    // macOS has no ss: lsof names this user's sockets, netstat lists everyone's.
+    mac
+      ? readMacListeners()
+      : run(binary("ss"), ["-H", "-tulnp"], 8_000).then((raw) => ({ listeners: parseSsListeners(raw), othersHidden: false })),
     tryRun(binary("docker"), ["ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Ports}}"], 4_000),
     context.paseo.agents.list().then(
       (list) => normalizeAgents(list),
@@ -226,9 +231,9 @@ export async function readServicesHandler(
     ),
   ]);
 
-  const table = readProcTable();
+  const table = await readProcTable();
   const home = os.homedir();
-  // ss names a process by its 15-character kernel name; the command line has the
+  // ss and lsof name a process by its short name; the command line has the
   // full path, and the path is what separates /usr/sbin/... from ~/.venv/bin/python.
   const commands = new Map<number, string>();
   const commandFor = (pid: number): string => {
@@ -243,9 +248,9 @@ export async function readServicesHandler(
   // --- agent roots -----------------------------------------------------------
   const daemonPid = process.ppid;
   const ownChain = ancestorsOf(process.pid, table);
-  const children = table
-    .filter((entry) => entry.ppid === daemonPid)
-    .map((child) => ({ ...child, command: commandFor(child.pid), cwd: cwdOf(child.pid) }));
+  const daemonChildren = table.filter((entry) => entry.ppid === daemonPid);
+  const cwds = await cwdsOf(daemonChildren.map((child) => child.pid));
+  const children = daemonChildren.map((child) => ({ ...child, command: commandFor(child.pid), cwd: cwds.get(child.pid) ?? "" }));
   const roots = matchAgentRoots(children, agentList, ownChain);
 
   /** pid -> the agent it ultimately belongs to. */
@@ -269,7 +274,7 @@ export async function readServicesHandler(
   const ports: PortRow[] = [];
   let hidden = 0;
 
-  for (const listener of parseSsListeners(ssRaw)) {
+  for (const listener of listeners) {
     const key = portKey(listener.protocol, listener.address, listener.port);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -326,6 +331,7 @@ export async function readServicesHandler(
       `${hidden} listening socket${hidden === 1 ? "" : "s"} belong to another user; run with elevated rights to attribute them.`,
     );
   }
+  if (othersHidden) notes.push("macOS showed this plugin only your own processes' sockets, so other users' ports are not listed.");
   if (dockerRaw === null) notes.push("Docker was not reachable, so containers are not listed.");
 
   // --- services --------------------------------------------------------------

@@ -40,7 +40,7 @@ const MB = 1024 * 1024;
 const size = (bytes: number): string =>
   bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : `${Math.round(bytes / MB)} MB`;
 
-/** Documented behaviour of Linux components people actually see at the top of a CPU list. */
+/** Documented behaviour of Linux and macOS components people actually see at the top of a CPU list. */
 const KNOWN: Record<string, { what: string; trigger?: string }> = {
   kswapd0: { what: "the kernel's memory reclaimer", trigger: "memory running low, so pages are being evicted or swapped" },
   kcompactd0: { what: "the kernel's memory compactor", trigger: "a request for large contiguous memory, often from huge pages" },
@@ -79,6 +79,23 @@ const KNOWN: Record<string, { what: string; trigger?: string }> = {
   earlyoom: { what: "the early out-of-memory killer", trigger: "memory running low" },
   irqbalance: { what: "the interrupt balancer" },
   rsyslogd: { what: "the system log writer", trigger: "a process logging heavily" },
+  // macOS, from dutchakdev's original.
+  mds_stores: { what: "Spotlight's index store", trigger: "indexing after a lot of files changed" },
+  mds: { what: "the Spotlight metadata server", trigger: "indexing work" },
+  mdworker_shared: { what: "a Spotlight indexing worker", trigger: "indexing work" },
+  mdsync: { what: "a Spotlight index sync worker", trigger: "indexing work" },
+  kernel_task: { what: "the kernel's own task, which also absorbs CPU deliberately to cool the machine" },
+  WindowServer: { what: "the compositor every window on screen draws through" },
+  loginwindow: { what: "the manager of your login session" },
+  backupd: { what: "Time Machine", trigger: "a scheduled or manual backup" },
+  photoanalysisd: { what: "Photos' library analysis", trigger: "new photos to scan for faces and scenes" },
+  bird: { what: "iCloud Drive's file sync" },
+  cloudd: { what: "iCloud sync" },
+  syspolicyd: { what: "Gatekeeper's policy service", trigger: "first launch of a newly downloaded app" },
+  trustd: { what: "certificate validation" },
+  coreaudiod: { what: "the system audio server" },
+  XprotectService: { what: "XProtect's scanning service", trigger: "a scheduled malware check" },
+  "com.apple.Virtualization.VirtualMachine": { what: "a virtual machine, usually the one Docker runs Linux in" },
 };
 
 const DEV_RUNTIMES = new Set([
@@ -86,8 +103,18 @@ const DEV_RUNTIMES = new Set([
   "python", "python3", "ruby", "java", "go", "cargo", "php",
 ]);
 
-/** Kernel threads carry a suffix per CPU or per device (`kworker/3:1H`, `jbd2/sda1-8`). */
+/**
+ * Kernel threads carry a suffix per CPU or per device (`kworker/3:1H`, `jbd2/sda1-8`).
+ * macOS's XProtect remediators carry the malware family they check for.
+ */
 export function describeKnown(name: string): { what: string; trigger?: string } | null {
+  const remediator = /^XProtectRemediator(.+)$/.exec(name);
+  if (remediator) {
+    return {
+      what: `XProtect Remediator, Apple's built-in malware remediation, running its ${remediator[1]} check`,
+      trigger: "a scheduled scan, or one queued after a definition update",
+    };
+  }
   const bare = /^\[(.*)\]$/.exec(name)?.[1] ?? name;
   return KNOWN[bare] ?? KNOWN[bare.split("/")[0]] ?? null;
 }

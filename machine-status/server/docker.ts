@@ -152,8 +152,9 @@ async function readUsage(): Promise<{ raw: string | null; pending: boolean }> {
 }
 
 /**
- * On Linux the engine is a system service. Starting it needs root, so the panel
- * reports why the daemon did not answer instead of offering a button that cannot work.
+ * On Linux the engine is a system service, and on macOS an app (Docker Desktop,
+ * OrbStack, Colima). Starting it is not the panel's to do, so it reports why the
+ * daemon did not answer instead of offering a button that may not work.
  */
 export async function readDockerHandler(): Promise<ReadOutput> {
   const collectedAt = new Date().toISOString();
@@ -187,7 +188,9 @@ export async function readDockerHandler(): Promise<ReadOutput> {
       { state: "stopped", version: null, detail },
       /permission denied/i.test(detail)
         ? "This user may not use the Docker socket. Add it to the docker group, then log in again."
-        : "The Docker daemon is not running. Start it with `sudo systemctl start docker`.",
+        : process.platform === "darwin"
+          ? "The Docker daemon is not running. Open Docker Desktop, or start the engine you use."
+          : "The Docker daemon is not running. Start it with `sudo systemctl start docker`.",
     );
   }
 

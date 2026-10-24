@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test server/*.test.mjs"
+    "test": "node --test server/*.test.mjs client/*.test.mjs"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.13.0",

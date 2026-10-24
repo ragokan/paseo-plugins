@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { z } from "zod";
 import type { killProcess, listProcesses, ProcessSchema } from "../shared/contracts.ts";
 import { describeError } from "./exec.ts";
-import { commandOf, readProcTable, sampleProcesses, type RawProcess } from "./proc.ts";
+import { commandOf, isRunning, readProcTable, sampleProcesses, type RawProcess } from "./proc.ts";
 
 type ProcessEntry = z.output<typeof ProcessSchema>;
 type ListInput = z.output<typeof listProcesses.input>;
@@ -56,16 +55,6 @@ export function sortByUsage<T extends { pid: number; rssBytes: number }>(
   );
 }
 
-/** A zombie has already exited and only waits for its parent to collect it. */
-function isAlive(pid: number): boolean {
-  try {
-    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return raw.slice(raw.lastIndexOf(")") + 2, raw.lastIndexOf(")") + 3) !== "Z";
-  } catch {
-    return false;
-  }
-}
-
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function listProcessesHandler({ sortBy, limit }: ListInput): Promise<ListOutput> {
@@ -92,7 +81,7 @@ export async function listProcessesHandler({ sortBy, limit }: ListInput): Promis
 export async function killProcessHandler({ pid, signal }: KillInput): Promise<KillOutput> {
   // The guard is recomputed from a fresh table on every call. The client's view
   // may be stale, and a PID it believes is safe may have been reused since.
-  const table = readProcTable();
+  const table = await readProcTable();
   const guarded = guardedPids(table, process.pid);
   const target = table.find((entry) => entry.pid === pid);
 
@@ -120,5 +109,5 @@ export async function killProcessHandler({ pid, signal }: KillInput): Promise<Ki
 
   // SIGTERM is a request. Report honestly whether the process actually went away.
   await wait(400);
-  return { ok: true, pid, signal, stillRunning: isAlive(pid), error: null };
+  return { ok: true, pid, signal, stillRunning: await isRunning(pid), error: null };
 }

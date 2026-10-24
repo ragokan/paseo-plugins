@@ -21,7 +21,12 @@ export const FEATURES = [
     title: "MCP toggle",
     hint: "Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer",
   },
-  { id: "machine-status", scope: "host", title: "Machine status", hint: "CPU, memory, disk, ports, processes and Docker for a Linux host" },
+  {
+    id: "machine-status",
+    scope: "host",
+    title: "Machine status",
+    hint: "CPU, memory, disk, ports, processes and Docker for a Linux or macOS host, read only while its screen is on screen",
+  },
   {
     id: "continue-after-error",
     scope: "host",
@@ -49,7 +54,7 @@ export const HOST_FEATURES = FEATURES.filter((feature): feature is Extract<Featu
 
 export const DEFAULT_APP_FEATURES = Object.fromEntries(APP_FEATURES.map((feature) => [feature.id, true])) as AppFeatures;
 
-/** The host switches, saved on each host. Machine status reads /proc, so it starts on only on Linux. */
+/** The host switches, saved on each host. Machine status starts on only on Linux; a Mac switches it on. */
 export function hostFeatureSettings(linux: boolean) {
   return defineSettings({
     id: "features",

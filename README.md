@@ -8,7 +8,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
-| [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux machine the daemon runs on. |
+| [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux or macOS machine the daemon runs on, read only while its screen is on screen. |
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |

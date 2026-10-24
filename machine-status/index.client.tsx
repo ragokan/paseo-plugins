@@ -14,7 +14,7 @@ export default function contribute(client: PluginClientContext) {
     id: "open-machine-status",
     title: "Machine status",
     icon: "Activity",
-    keywords: ["cpu", "memory", "disk", "swap", "processes", "ports", "services", "linux"],
+    keywords: ["cpu", "memory", "disk", "swap", "processes", "ports", "services", "linux", "macos"],
     context: "global",
     onSelect(capabilities) {
       openMachineScreen(capabilities);
@@ -28,7 +28,7 @@ export default function contribute(client: PluginClientContext) {
       id: "open-machine-services",
       title: "Machine: ports & services",
       icon: "Network",
-      keywords: ["ports", "listening", "ss", "dev server"],
+      keywords: ["ports", "listening", "ss", "lsof", "dev server"],
       context: "global",
       onSelect(capabilities) {
         openMachineScreen(capabilities, { tab: "services" });

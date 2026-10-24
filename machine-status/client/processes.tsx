@@ -18,10 +18,13 @@ export function ProcessesSection({
   chrome,
   hostId,
   palette,
+  live,
 }: {
   chrome: Chrome;
   hostId: string;
   palette: VizPalette;
+  /** Whether the Machine screen is the one on screen; it reads nothing while it is not. */
+  live: boolean;
 }) {
   const styles = useChromeStyles(chrome);
   const list = useRpc(listProcesses);
@@ -37,7 +40,8 @@ export function ProcessesSection({
   const processes = useQuery({
     queryKey: ["machine-status", "processes", hostId, sortBy],
     queryFn: () => list({ sortBy, limit: 8 }),
-    refetchInterval: activePid === null ? 5_000 : false,
+    enabled: live,
+    refetchInterval: activePid === null && live ? 5_000 : false,
   });
 
   const items = processes.data?.items ?? [];

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statfsSync } from "node:fs";
 import os from "node:os";
 import type { z } from "zod";
 import type { MetricsSchema } from "../shared/contracts.ts";
+import { macVolumeOf, readMacMachine } from "./mac.ts";
 
 type Metrics = z.output<typeof MetricsSchema>;
 type HistorySample = Metrics["history"][number];
@@ -11,8 +12,9 @@ type Disk = Metrics["disk"];
 type Swap = Metrics["swap"];
 
 /**
- * Everything here reads /proc, /sys and statfs directly. No metric starts a
- * process, so a poll costs a handful of small file reads.
+ * On Linux everything here reads /proc, /sys and statfs directly. No metric
+ * starts a process, so a poll costs a handful of small file reads. macOS has no
+ * /proc; its readers are in mac.ts.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -44,9 +46,11 @@ export function buildMemory(info: Record<string, number>, stallPercent: number |
     appBytes: get("AnonPages"),
     sharedBytes,
     kernelBytes: get("SUnreclaim") + get("KernelStack") + get("PageTables") + get("SecPageTables"),
+    compressedBytes: 0,
     cachedBytes: Math.max(0, get("Buffers") + get("Cached") + get("SReclaimable") - sharedBytes),
     usedPercent: totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0,
     stallPercent,
+    pressure: null,
   };
 }
 
@@ -113,6 +117,23 @@ export function parseStat(raw: string): StatTimes | null {
     else cores.set(Number(match[1]), times);
   }
   return all ? { all, cores } : null;
+}
+
+/**
+ * macOS's per-core times from os.cpus(), in milliseconds: user, nice, sys, idle
+ * and irq. It has no steal or I/O wait, so those stay 0.
+ */
+export function statFromCpus(cpus: readonly { times: { user: number; nice: number; sys: number; idle: number; irq: number } }[]): StatTimes | null {
+  if (cpus.length === 0) return null;
+  const cores = new Map<number, CpuTimes>();
+  const all: CpuTimes = { busy: 0, total: 0, user: 0, system: 0, steal: 0, iowait: 0 };
+  cpus.forEach(({ times }, id) => {
+    const total = times.user + times.nice + times.sys + times.idle + times.irq;
+    const core: CpuTimes = { busy: total - times.idle, total, user: times.user + times.nice, system: times.sys + times.irq, steal: 0, iowait: 0 };
+    cores.set(id, core);
+    for (const key of ["busy", "total", "user", "system"] as const) all[key] += core[key];
+  });
+  return { all, cores };
 }
 
 export function busyBetween(previous: CpuTimes, current: CpuTimes): number {
@@ -284,6 +305,7 @@ export function toHistorySample(metrics: Omit<Metrics, "history">): HistorySampl
     appBytes: metrics.memory.appBytes,
     sharedBytes: metrics.memory.sharedBytes,
     kernelBytes: metrics.memory.kernelBytes,
+    compressedBytes: metrics.memory.compressedBytes,
     swapUsedBytes: metrics.swap.usedBytes,
   };
 }
@@ -351,6 +373,10 @@ const IDLE_USAGE: CpuUsage = {
 
 let lastCpu: { at: number; times: StatTimes; usage: CpuUsage } | null = null;
 
+function readStatTimes(): StatTimes | null {
+  return process.platform === "darwin" ? statFromCpus(os.cpus()) : parseStat(read("/proc/stat") ?? "");
+}
+
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -364,10 +390,10 @@ async function readCpuUsage(): Promise<CpuUsage> {
   if (lastCpu && now - lastCpu.at < MIN_CPU_WINDOW_MS) return lastCpu.usage;
   let previous = lastCpu?.times ?? null;
   if (!lastCpu || now - lastCpu.at > MAX_CPU_WINDOW_MS) {
-    previous = parseStat(read("/proc/stat") ?? "");
+    previous = readStatTimes();
     await wait(FIRST_CPU_WINDOW_MS);
   }
-  const current = parseStat(read("/proc/stat") ?? "");
+  const current = readStatTimes();
   if (!current || !previous) return IDLE_USAGE;
   const usage = usageBetween(previous, current);
   lastCpu = { at: Date.now(), times: current, usage };
@@ -381,20 +407,24 @@ export async function readMetricsHandler(): Promise<Metrics> {
 
 /** One reading without touching the chart history. */
 export async function collectMetrics(): Promise<Omit<Metrics, "history">> {
-  if (process.platform !== "linux") {
-    throw new Error(`machine-status reads Linux's /proc; this daemon runs on ${process.platform}.`);
+  const mac = process.platform === "darwin";
+  if (!mac && process.platform !== "linux") {
+    throw new Error(`machine-status reads Linux and macOS; this daemon runs on ${process.platform}.`);
   }
 
-  const usage = await readCpuUsage();
-  const meminfo = parseMeminfo(read("/proc/meminfo") ?? "");
-  const cpuPressure = read("/proc/pressure/cpu");
-  const memoryPressure = read("/proc/pressure/memory");
   const home = os.homedir();
+  const [usage, machine, mountedOn] = await Promise.all([
+    readCpuUsage(),
+    mac ? readMacMachine() : readLinuxMachine(),
+    mac ? macVolumeOf(home) : mountPointFor(read("/proc/self/mounts") ?? "", home),
+  ]);
+  const cpuPressure = mac ? null : read("/proc/pressure/cpu");
   const cores = os.availableParallelism();
   const [loadAvg1, loadAvg5, loadAvg15] = os.loadavg();
 
   return {
     collectedAt: new Date().toISOString(),
+    os: mac ? "macos" : "linux",
     hostname: os.hostname(),
     platform: `${os.type()} ${os.release()} (${os.arch()})`,
     uptimeSeconds: os.uptime(),
@@ -407,9 +437,18 @@ export async function collectMetrics(): Promise<Omit<Metrics, "history">> {
       ...usage,
       stallPercent: cpuPressure === null ? null : parsePressure(cpuPressure),
     },
+    ...machine,
+    // On macOS, APFS volumes share their container, so used is the container's, as Finder shows it.
+    disk: diskFrom(statfsSync(home), mountedOn),
+  };
+}
+
+async function readLinuxMachine(): Promise<Pick<Metrics, "memory" | "swap" | "power" | "thermal">> {
+  const meminfo = parseMeminfo(read("/proc/meminfo") ?? "");
+  const memoryPressure = read("/proc/pressure/memory");
+  return {
     memory: buildMemory(meminfo, memoryPressure === null ? null : parsePressure(memoryPressure)),
     swap: buildSwap(meminfo),
-    disk: diskFrom(statfsSync(home), mountPointFor(read("/proc/self/mounts") ?? "", home)),
     power: buildPower(readSupplies()),
     thermal: buildThermal(readZones()),
   };

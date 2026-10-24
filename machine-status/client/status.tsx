@@ -1,12 +1,14 @@
 import { useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ColumnChart, CoreBars, Legend, Meter, Sparkbars, StackedColumnChart, StatTile } from "./charts.tsx";
 import { ServicesTab } from "./services.tsx";
 import { DockerTab } from "./docker.tsx";
 import type { MachineScreenProps } from "./compat.tsx";
 import { ContextMenuProvider } from "./menu.tsx";
+import { useCurrentScreen } from "./viewing.ts";
+import { watchShown } from "./web.ts";
 import { readMetrics, type Metrics } from "../shared/contracts.ts";
 import { formatBytes, formatDuration, formatMinutes, formatPercent } from "../shared/format.ts";
 import { ProcessesSection } from "./processes.tsx";
@@ -32,7 +34,33 @@ const THERMAL_LABEL: Record<string, string> = {
 
 const GB = 1024 ** 3;
 
-function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
+type MemoryKey = "appBytes" | "sharedBytes" | "kernelBytes" | "compressedBytes";
+
+/**
+ * The memory in use the chart stacks, as each system splits it. macOS has no
+ * tmpfs to speak of; its compressed memory takes that slot, and its wired
+ * memory the kernel's.
+ */
+const MEMORY_PARTS: Record<Metrics["os"], readonly { label: string; detail: string; key: MemoryKey }[]> = {
+  linux: [
+    { label: "Apps", detail: "Apps", key: "appBytes" },
+    { label: "Shared", detail: "Shared and tmpfs", key: "sharedBytes" },
+    { label: "Kernel", detail: "Kernel", key: "kernelBytes" },
+  ],
+  macos: [
+    { label: "Apps", detail: "Apps", key: "appBytes" },
+    { label: "Compressed", detail: "Compressed", key: "compressedBytes" },
+    { label: "Wired", detail: "Wired", key: "kernelBytes" },
+  ],
+};
+
+const PRESSURE_LABEL: Record<NonNullable<Metrics["memory"]["pressure"]>, string> = {
+  normal: "Normal",
+  warning: "Warning",
+  critical: "Critical",
+};
+
+function OverviewTab({ theme, layout, host, live }: PluginSurfaceProps & { live: boolean }) {
   const chrome: Chrome = { theme, compact: layout.compact };
   const styles = useChromeStyles(chrome);
   const palette = useMemo(() => paletteFor(theme.colors.surface0), [theme.colors.surface0]);
@@ -46,10 +74,13 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
   const metrics = useQuery({
     queryKey: ["machine-status", "metrics", host.id],
     queryFn: () => read({}),
-    refetchInterval: paused ? false : 3_000,
+    enabled: live,
+    refetchInterval: paused || !live ? false : 3_000,
   });
   const data = metrics.data;
   const history = data?.history ?? [];
+  const mac = data?.os === "macos";
+  const parts = MEMORY_PARTS[data?.os ?? "linux"];
 
   // Fixed plot widths: the chart occupies the whole card and fills from the right.
   const sparkSlots = layout.compact ? 20 : 40;
@@ -66,10 +97,10 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
   const memColumns = useMemo(
     () =>
       history.map((sample) => ({
-        parts: [sample.appBytes, sample.sharedBytes, sample.kernelBytes],
+        parts: parts.map((part) => sample[part.key]),
         total: data?.memory.totalBytes ?? 1,
       })),
-    [history, data?.memory.totalBytes],
+    [history, parts, data?.memory.totalBytes],
   );
 
   const cpuSeverity = cpuSeverityOf(data?.cpu.busyPercent ?? null);
@@ -169,13 +200,17 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               label="SWAP"
               labelColor={palette.series[2]}
               meta={hasSwap ? formatBytes(data.swap.totalBytes) : ""}
-              value={hasSwap ? formatBytes(data.swap.usedBytes) : "Off"}
+              value={hasSwap ? formatBytes(data.swap.usedBytes) : mac ? "None" : "Off"}
               valueSuffix={hasSwap ? "in use" : ""}
               expanded={expanded === "swap"}
               onPress={() => toggle("swap")}
               footer={
                 <Text style={styles.muted}>
-                  {hasSwap ? `${formatBytes(data.swap.freeBytes)} free` : "No swap configured"}
+                  {hasSwap
+                    ? `${formatBytes(data.swap.freeBytes)} free`
+                    : mac
+                      ? "macOS adds swap when it needs it"
+                      : "No swap configured"}
                 </Text>
               }
             >
@@ -219,17 +254,23 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
               />
               <MetricRow chrome={chrome} label="User" value={formatPercent(data.cpu.userPercent)} />
               <MetricRow chrome={chrome} label="System" value={formatPercent(data.cpu.systemPercent)} />
-              <MetricRow chrome={chrome} label="Steal" value={formatPercent(data.cpu.stealPercent)} />
-              <MetricRow chrome={chrome} label="I/O wait" value={formatPercent(data.cpu.iowaitPercent)} />
+              {mac ? null : (
+                <>
+                  <MetricRow chrome={chrome} label="Steal" value={formatPercent(data.cpu.stealPercent)} />
+                  <MetricRow chrome={chrome} label="I/O wait" value={formatPercent(data.cpu.iowaitPercent)} />
+                </>
+              )}
               <MetricRow chrome={chrome} label="Load 1 min" value={data.cpu.loadAvg1.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load 5 min" value={data.cpu.loadAvg5.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load 15 min" value={data.cpu.loadAvg15.toFixed(2)} />
               <MetricRow chrome={chrome} label="Load per core" value={formatPercent(data.cpu.loadPercent)} />
-              <MetricRow chrome={chrome} label="Waiting for CPU, 10 s" value={formatPercent(data.cpu.stallPercent)} />
+              {mac ? null : (
+                <MetricRow chrome={chrome} label="Waiting for CPU, 10 s" value={formatPercent(data.cpu.stallPercent)} />
+              )}
               <Text style={styles.muted}>
-                Busy is user plus system plus steal. Steal is time the cloud host gave to other
-                guests; I/O wait is idle time spent waiting on disk. Linux load also counts tasks
-                waiting on disk, so it can sit above 100% per core while the CPU is idle.
+                {mac
+                  ? "Busy is user plus system time. Load counts the threads running or waiting to run, so 100% per core means every core has one."
+                  : "Busy is user plus system plus steal. Steal is time the cloud host gave to other guests; I/O wait is idle time spent waiting on disk. Linux load also counts tasks waiting on disk, so it can sit above 100% per core while the CPU is idle."}
               </Text>
             </DetailCard>
           ) : null}
@@ -237,10 +278,8 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
           {expanded === "memory" ? (
             <DetailCard chrome={chrome} title="Memory · detail" onClose={() => setExpanded(null)}>
               {[
-                { label: "Apps", bytes: data.memory.appBytes, color: palette.series[0] },
-                { label: "Shared and tmpfs", bytes: data.memory.sharedBytes, color: palette.series[1] },
-                { label: "Kernel", bytes: data.memory.kernelBytes, color: palette.series[2] },
-                { label: "Reclaimable cache", bytes: data.memory.cachedBytes, color: palette.neutral },
+                ...parts.map((part, index) => ({ label: part.detail, bytes: data.memory[part.key], color: palette.series[index] })),
+                { label: mac ? "Cached files" : "Reclaimable cache", bytes: data.memory.cachedBytes, color: palette.neutral },
               ].map((row) => (
                 <View key={row.label} style={{ gap: 4 }}>
                   <View style={styles.row}>
@@ -256,14 +295,23 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                 </View>
               ))}
               <MetricRow chrome={chrome} label="Available" value={formatBytes(data.memory.availableBytes)} />
-              <MetricRow
-                chrome={chrome}
-                label="Waiting for memory, 10 s"
-                value={formatPercent(data.memory.stallPercent)}
-              />
+              {mac ? (
+                <MetricRow
+                  chrome={chrome}
+                  label="Memory pressure"
+                  value={data.memory.pressure === null ? "Not reported" : PRESSURE_LABEL[data.memory.pressure]}
+                />
+              ) : (
+                <MetricRow
+                  chrome={chrome}
+                  label="Waiting for memory, 10 s"
+                  value={formatPercent(data.memory.stallPercent)}
+                />
+              )}
               <Text style={styles.muted}>
-                In use is total minus what the kernel calls available. Shared memory and tmpfs files
-                count as cache in `free`, but they stay in RAM until deleted.
+                {mac
+                  ? "In use is app, wired and compressed memory, as Activity Monitor counts it. Wired memory cannot be compressed or paged out; cached files go when apps need the room."
+                  : "In use is total minus what the kernel calls available. Shared memory and tmpfs files count as cache in `free`, but they stay in RAM until deleted."}
               </Text>
             </DetailCard>
           ) : null}
@@ -363,11 +411,11 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                 />
                 <Legend
                   chrome={chrome}
-                  items={[
-                    { label: "Apps", value: formatBytes(data.memory.appBytes), color: palette.series[0] },
-                    { label: "Shared", value: formatBytes(data.memory.sharedBytes), color: palette.series[1] },
-                    { label: "Kernel", value: formatBytes(data.memory.kernelBytes), color: palette.series[2] },
-                  ]}
+                  items={parts.map((part, index) => ({
+                    label: part.label,
+                    value: formatBytes(data.memory[part.key]),
+                    color: palette.series[index],
+                  }))}
                 />
                 <Text style={styles.muted}>
                   Headroom above the stack is free or reclaimable cache · cache{" "}
@@ -415,7 +463,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                   <MetricRow chrome={chrome} label="Free" value={formatBytes(data.swap.freeBytes)} />
                 </>
               ) : (
-                <MetricRow chrome={chrome} label="Swap" value="None configured" />
+                <MetricRow chrome={chrome} label="Swap" value={mac ? "None in use" : "None configured"} />
               )}
 
               <View style={styles.divider} />
@@ -445,7 +493,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
                 label="Thermal"
                 value={
                   data.thermal.celsius === null
-                    ? THERMAL_LABEL.unknown
+                    ? THERMAL_LABEL[data.thermal.level]
                     : `${data.thermal.celsius.toFixed(0)} °C${
                         data.thermal.level === "unknown" ? "" : ` · ${THERMAL_LABEL[data.thermal.level]}`
                       }`
@@ -455,7 +503,7 @@ function OverviewTab({ theme, layout, host }: PluginSurfaceProps) {
           ) : null}
         </View>
         <View style={{ flex: 1 }}>
-          <ProcessesSection chrome={chrome} hostId={host.id} palette={palette} />
+          <ProcessesSection chrome={chrome} hostId={host.id} palette={palette} live={live} />
         </View>
       </View>
     </ScrollView>
@@ -502,7 +550,10 @@ function tabFromParams(params: MachineScreenProps["params"]): TabId {
 /**
  * Only the selected tab is mounted. The services tab runs ss and docker on a
  * timer, and mounting it in the background would keep that running for a panel
- * nobody is looking at.
+ * nobody is looking at. Paseo keeps this screen mounted, hidden, under a screen
+ * opened on top of it, so the tabs read the daemon only while it is the one on
+ * screen: the page says when it is hidden on desktop and web, and the sidebar
+ * row says which screen is current everywhere.
  */
 export function MachineStatusSurface(props: MachineScreenProps) {
   const chrome: Chrome = { theme: props.theme, compact: props.layout.compact };
@@ -512,9 +563,15 @@ export function MachineStatusSurface(props: MachineScreenProps) {
   // Opening the already-open screen with another `tab` swaps params without a remount.
   useEffect(() => setTab(linkedTab), [linkedTab]);
 
+  const root = useRef<View>(null);
+  const [shown, setShown] = useState(true);
+  useEffect(() => watchShown(root.current, setShown), []);
+  const current = useCurrentScreen(props.host.id);
+  const live = shown && current;
+
   return (
     <ContextMenuProvider chrome={chrome}>
-      <View style={styles.screen}>
+      <View ref={root} style={styles.screen}>
       <View
         style={{
           flexDirection: "row",
@@ -555,9 +612,9 @@ export function MachineStatusSurface(props: MachineScreenProps) {
         })}
       </View>
 
-      {tab === "overview" ? <OverviewTab {...props} /> : null}
-      {tab === "services" ? <ServicesTab {...props} /> : null}
-      {tab === "docker" ? <DockerTab {...props} /> : null}
+      {tab === "overview" ? <OverviewTab {...props} live={live} /> : null}
+      {tab === "services" ? <ServicesTab {...props} live={live} /> : null}
+      {tab === "docker" ? <DockerTab {...props} live={live} /> : null}
       </View>
     </ContextMenuProvider>
   );

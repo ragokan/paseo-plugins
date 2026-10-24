@@ -16,7 +16,7 @@ import { contextMenuTriggers, useContextMenu, type ContextMenuItem } from "./men
 import { Card, MetricRow, useChromeStyles, type Chrome } from "./ui.tsx";
 import { paletteFor, type VizPalette } from "../shared/viz.ts";
 
-export function DockerTab({ theme, layout, host }: PluginSurfaceProps) {
+export function DockerTab({ theme, layout, host, live }: PluginSurfaceProps & { live: boolean }) {
   const chrome: Chrome = { theme, compact: layout.compact };
   const styles = useChromeStyles(chrome);
   const palette = paletteFor(theme.colors.surface0);
@@ -32,7 +32,8 @@ export function DockerTab({ theme, layout, host }: PluginSurfaceProps) {
   const docker = useQuery({
     queryKey: ["machine-status", "docker", host.id],
     queryFn: () => read({}),
-    refetchInterval: activeId !== null ? false : 10_000,
+    enabled: live,
+    refetchInterval: activeId !== null || !live ? false : 10_000,
   });
 
   const act = useMutation({

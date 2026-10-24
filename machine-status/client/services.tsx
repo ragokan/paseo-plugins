@@ -13,18 +13,19 @@ const SOURCE_DOT: Record<ServiceRow["source"], "agent" | "plain"> = {
   listener: "plain",
 };
 
-export function ServicesTab({ theme, layout, host }: PluginSurfaceProps) {
+export function ServicesTab({ theme, layout, host, live }: PluginSurfaceProps & { live: boolean }) {
   const chrome: Chrome = { theme, compact: layout.compact };
   const styles = useChromeStyles(chrome);
   const palette = paletteFor(theme.colors.surface0);
   const read = useRpc(readServices);
 
-  // Collection runs ss and docker, so it only runs while this tab is the one on
-  // screen.
+  // Collection runs ss (lsof and netstat on macOS) and docker, so it only runs
+  // while this tab is the one on screen.
   const services = useQuery({
     queryKey: ["machine-status", "services", host.id],
     queryFn: () => read({}),
-    refetchInterval: 5_000,
+    enabled: live,
+    refetchInterval: live ? 5_000 : false,
   });
 
   const data = services.data;
