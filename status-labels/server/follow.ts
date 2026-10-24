@@ -1,5 +1,17 @@
 import type { AgentSnapshot, Api, Daemon, Subscription, WorkspaceSnapshot } from "./daemon.ts";
-import { type Agent, type DoneMarks, LABELS, labelChanges, labelFor, managedLabel, nextIdleEnd, waitingWorkspaces, type Workspace } from "./labels.ts";
+import {
+  type Agent,
+  type DoneMarks,
+  doneSince,
+  LABELS,
+  labelChanges,
+  labelFor,
+  managedLabel,
+  nextIdleEnd,
+  waitingWorkspaces,
+  type Workspace,
+} from "./labels.ts";
+import { dataDirectory, loadDoneSince, saveDoneSince } from "./store.ts";
 
 // Paseo labels an agent another agent started with the starter's id, on whichever host it runs.
 const PARENT_LABEL = "paseo.parent-agent-id";
@@ -42,7 +54,11 @@ function toAgent(agent: AgentSnapshot): Agent | null {
  */
 export function followLabels({ daemon, paseo, enabled, doneMarks }: FollowOptions): { relabel: () => void; stop: () => Promise<void> } {
   const workspaces = new Map<string, Workspace>();
+  // Until the first list arrives, an empty map would forget every workspace's time in Done.
+  let workspacesListed = false;
   let followedWorkspaces: Followed<WorkspaceSnapshot> | undefined;
+  const directory = dataDirectory();
+  let since = loadDoneSince(directory);
   const hosts = new Map<string, FollowedAgents>();
   let stopped = false;
 
@@ -64,13 +80,17 @@ export function followLabels({ daemon, paseo, enabled, doneMarks }: FollowOption
     }
     running = true;
     try {
+      if (!workspacesListed) return;
       const now = Date.now();
       const done = await doneMarks();
+      const next = doneSince(since, workspaces.values(), done);
+      if (JSON.stringify(next) !== JSON.stringify(since)) saveDoneSince(directory, next);
+      since = next;
       const waiting = waitingWorkspaces(new Map([...hosts.values()].flatMap((host) => [...host.agents])));
       const on = enabled();
       for (const workspace of [...workspaces.values()]) {
         if (stopped) return;
-        const { remove, add } = labelChanges(workspace.labels ?? [], on ? labelFor(workspace, now, waiting, done) : null);
+        const { remove, add } = labelChanges(workspace.labels ?? [], on ? labelFor(workspace, now, waiting, since, done) : null);
         try {
           for (const name of remove) {
             const label = { name, color: LABELS[managedLabel(name)!] };
@@ -87,7 +107,7 @@ export function followLabels({ daemon, paseo, enabled, doneMarks }: FollowOption
       }
       // A workspace leaves Idle when its day is up, with nothing else changing.
       clearTimeout(idleEnd);
-      const end = on ? nextIdleEnd(workspaces.values(), now, waiting, done) : null;
+      const end = on ? nextIdleEnd(workspaces.values(), now, waiting, since, done) : null;
       // A timer can fire a little early; the second's margin keeps it from finding the workspace still in Idle.
       if (end !== null && !stopped) idleEnd = setTimeout(schedule, Math.max(0, end - Date.now()) + 1000);
     } catch (error) {
@@ -121,6 +141,7 @@ export function followLabels({ daemon, paseo, enabled, doneMarks }: FollowOption
       const accept = (entries: WorkspaceSnapshot[]) => {
         workspaces.clear();
         for (const workspace of entries) workspaces.set(workspace.id, workspace);
+        workspacesListed = true;
         schedule();
       };
       accept(entries);

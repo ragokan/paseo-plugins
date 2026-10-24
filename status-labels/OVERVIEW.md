@@ -12,4 +12,6 @@ Each workspace carries one of these, and the plugin swaps it as the workspace mo
 
 A subagent on another host keeps its starter's workspace in Waiting too, if the starter's daemon reaches that host (Paseo's hosts). Run Mark as done from hide-workspaces, in the all plugin, and the workspace's label goes from Idle to Done; the separate plugins do not share those marks. In the all plugin, switching it off takes its labels off.
 
+Paseo works out when a workspace entered Done again for every connection, from its agents' last update, so a daemon restart or a reopened chat moves it later than the time the app shows. The plugin keeps the earliest time it has seen for each stay in Done, in `plugin-data/status-labels/done-since.json` in the daemon's home, and starts a new stay when the workspace leaves Done or you send it a message. A workspace it sees for the first time, already in Done, takes the time of its Mark as done if it has one, and otherwise Paseo's time then, which can keep it in Idle longer than the app does.
+
 The plugin SDK has no label calls yet, so the plugin connects to its daemon as the Paseo CLI does, with the daemon's local credential, and needs the daemon to listen on a TCP address. It may stop working after a Paseo update. It sends nothing outside the daemons. It follows up to 200 active workspaces and 200 active agents per host.

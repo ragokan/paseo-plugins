@@ -19,6 +19,7 @@ export interface WorkspaceSnapshot {
   id: string;
   status: string;
   statusEnteredAt?: string | null;
+  lastUserMessageAt?: string | null;
   labels?: string[];
 }
 export interface AgentSnapshot {
