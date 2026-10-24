@@ -6,22 +6,23 @@ import { waitsInIdle } from "./client/idle";
 import { HideWorkspacesSettings } from "./client/screen";
 import { findSidebarModules, metroModules, patch } from "./client/sidebar";
 import { applyTweaks } from "./client/tweaks";
-import { styleIdleGroup } from "./client/web";
+import { stylePage } from "./client/web";
 
 declare const console: { warn(...args: unknown[]): void };
 declare function setTimeout(callback: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
 
 /**
- * What changes the app itself: the sidebar patch, the host badges and the New workspace form, Idle's
- * icon, and on desktop and web the settings page that hides workspaces.
+ * What changes the app itself: the sidebar patch, the host badges and the New workspace form, the
+ * page styles for Idle's icon, New workspace's host and the Done label, and on desktop and web the
+ * settings page that hides workspaces.
  */
 export function contributeApp(client: PluginClientContext) {
   // The page is desktop and web only; the iOS and Android apps follow the hidden workspaces the hosts keep.
   if (Platform.OS === "web") {
     client.addSettingsScreen({ id: "hide-workspaces", title: "Hide Workspaces", icon: "EyeOff", Component: HideWorkspacesSettings });
   }
-  const unstyle = styleIdleGroup();
+  const unstyle = stylePage();
   let unpatch: (() => void) | undefined;
   let untweak: (() => void) | undefined;
   let retry: unknown;

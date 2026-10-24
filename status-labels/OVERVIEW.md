@@ -6,7 +6,7 @@ Labels each workspace by the group the sidebar grouped by status shows it in, so
 - Review, green: Paseo's Ready to review.
 - Waiting, sky blue: in Done while an agent waits on a subagent, as the tweaks plugin's Waiting group.
 - Idle, yellow: in Done for less than a day, as the tweaks plugin's Idle group.
-- Done, indigo: Paseo's label colors have no gray.
+- Done, indigo: Paseo's label colors have no gray. The tweaks plugin draws it gray on the desktop and web apps.
 
 Each workspace carries one of these, and the plugin swaps it as the workspace moves. Labels you add yourself stay. It labels a label's first use with the color above; recolor it in Paseo and it keeps your color. Every daemon labels its own workspaces, so install it on every host.
 

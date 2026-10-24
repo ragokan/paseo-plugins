@@ -1,7 +1,7 @@
 {
   "id": "tweaks",
   "name": "Tweaks",
-  "description": "Hide the sidebar's workspaces you pick, Idle and Waiting groups with Mark as done, Idle's own icon, host names without the server icon, and the machine before the folder",
+  "description": "Hide the sidebar's workspaces you pick, Idle and Waiting groups with Mark as done, Idle's own icon, host names without the server icon, the machine before the folder, and a gray Done label",
   "requirements": {
     "paseo": ">=0.13.0"
   }

@@ -1,4 +1,5 @@
-import { cloneElement, isValidElement, type ReactNode } from "react";
+import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { View } from "react-native";
 import { loadedExports, type MetroModules } from "./sidebar";
 
 declare function setTimeout(callback: () => void, ms: number): unknown;
@@ -56,14 +57,34 @@ function holds(node: unknown, testID: string, depth = 3): boolean {
   return depth > 0 && (Array.isArray(children) ? children : [children]).some((child) => holds(child, testID, depth - 1));
 }
 
-/** The New workspace form, whose first two fields are the project and the host, with the host first. */
-export function hostPickerFirst(form: unknown): unknown {
+// The node with this testID, within depth levels, replaced by replace(node), its ancestors copied around it.
+function replaceByTestID(node: ReactNode, testID: string, replace: (element: ReactElement<Record<string, unknown>>) => ReactNode, depth = 3): ReactNode {
+  if (!isValidElement<{ testID?: string; children?: ReactNode }>(node)) return node;
+  if (node.props.testID === testID) return replace(node as ReactElement<Record<string, unknown>>);
+  if (depth === 0) return node;
+  const children = node.props.children;
+  const list = Array.isArray(children) ? (children as ReactNode[]) : [children];
+  const next = list.map((child) => replaceByTestID(child, testID, replace, depth - 1));
+  return next.every((child, index) => child === list[index]) ? node : cloneElement(node, undefined, ...next);
+}
+
+/** Around the host's status dot on New workspace, so the desktop and web page can hide the dot's box; see web.ts. */
+export const HOST_STATUS_MARKER = "tweaks-host-status";
+
+/**
+ * The New workspace form, whose first two fields are the project and the host, with the host first,
+ * and its status dot marked.
+ */
+export function tweakNewWorkspaceForm(form: unknown): unknown {
   if (!isValidElement<{ children?: unknown }>(form)) return form;
   const children = form.props.children;
   if (!Array.isArray(children)) return form;
   const [project, host, ...rest] = children as ReactNode[];
   if (!holds(project, "new-workspace-project-picker-trigger") || !holds(host, "host-picker-trigger")) return form;
-  return cloneElement(form, undefined, host, project, ...rest);
+  const marked = replaceByTestID(host, "host-picker-trigger", (trigger) =>
+    cloneElement(trigger, { icon: createElement(View, { testID: HOST_STATUS_MARKER }, trigger.props.icon as ReactNode) }),
+  );
+  return cloneElement(form, undefined, marked, project, ...rest);
 }
 
 type SelectMetaRowItems = (input: unknown) => MetaItem[];
@@ -91,12 +112,12 @@ const TWEAKS = [
     rows: true,
   },
   {
-    // New workspace: the host picker before the project picker. Paseo calls the hook on every render.
+    // New workspace: the host picker before the project picker, its dot marked. Paseo calls the hook on every render.
     find: (exports: Record<string, unknown>) => typeof exports.useNewWorkspaceForm === "function",
     name: "useNewWorkspaceForm",
     wrap: (original: UseNewWorkspaceForm) =>
       function useNewWorkspaceForm(input: unknown) {
-        return hostPickerFirst(original(input));
+        return tweakNewWorkspaceForm(original(input));
       },
     rows: false,
   },

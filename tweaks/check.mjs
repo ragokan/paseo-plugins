@@ -35,7 +35,7 @@ globalThis.window = { localStorage: globalThis.localStorage };
 // Plugin modules, compiled to CommonJS; relative imports load the same way, packages from node_modules.
 // The entry's React Native and its page are stubbed out, as on iOS, where the page is not added.
 const stubs = {
-  "react-native": { Platform: { OS: "ios" } },
+  "react-native": { Platform: { OS: "ios" }, View: "View" },
   "./client/screen": {},
 };
 const pluginModules = new Map();
@@ -599,7 +599,8 @@ const badgeModule = {
 };
 const field = (testID) => React.createElement("FieldTrigger", { testID });
 const control = (child) => React.createElement("View", { children: child });
-const hostPicker = React.createElement("HostPicker", { children: field("host-picker-trigger") });
+const dot = React.createElement("HostStatusDot", { serverId: BOX });
+const hostPicker = React.createElement("HostPicker", { children: React.createElement("FieldTrigger", { testID: "host-picker-trigger", icon: dot, value: "ragdevbox" }) });
 const forms = {
   desktop: React.createElement("View", { children: [control(field("new-workspace-project-picker-trigger")), control(hostPicker), control(field("isolation"))] }),
   compact: React.createElement("View", { children: [field("new-workspace-project-picker-trigger"), hostPicker, field("isolation")] }),
@@ -634,6 +635,16 @@ looks.shift().callback();
 const fields = (form) => React.Children.toArray(form.props.children).map((child) => JSON.stringify(child.props).match(/"testID":"([^"]+)"/)[1]);
 assert.deepEqual(fields(formModule.useNewWorkspaceForm("desktop")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
 assert.deepEqual(fields(formModule.useNewWorkspaceForm("compact")), ["host-picker-trigger", "new-workspace-project-picker-trigger", "isolation"]);
+// The host's status dot goes in a marker the desktop and web page hides, the trigger otherwise as it was.
+for (const layout of ["desktop", "compact"]) {
+  const [host] = React.Children.toArray(formModule.useNewWorkspaceForm(layout).props.children);
+  const picker = layout === "desktop" ? React.Children.only(host.props.children) : host;
+  const trigger = React.Children.only(picker.props.children);
+  assert.equal(trigger.props.testID, "host-picker-trigger");
+  assert.equal(trigger.props.value, "ragdevbox");
+  assert.equal(trigger.props.icon.props.testID, "tweaks-host-status");
+  assert.equal(React.Children.only(trigger.props.icon.props.children), dot);
+}
 assert.equal(formModule.useNewWorkspaceForm("other"), forms.other, "fields it does not know stay put");
 looks.shift().callback();
 assert.equal(looks.length, 0, "all found, no more looking");
