@@ -40,10 +40,19 @@ execFileSync(process.execPath, [path.join(root, "build.mjs")], { stdio: "inherit
 const { FEATURES, DEFAULT_APP_FEATURES, hostFeatureSettings } = load("shared/features.ts");
 const features = FEATURES.map((feature) => feature.id);
 assert.ok(Object.values(DEFAULT_APP_FEATURES).every(Boolean), "app plugins start on");
-assert.deepEqual(hostFeatureSettings(true).schema.parse({}), { "mcp-toggle": true, "machine-status": true }, "machine status on for Linux");
-assert.deepEqual(hostFeatureSettings(false).schema.parse({}), { "mcp-toggle": true, "machine-status": false }, "and off elsewhere");
-for (const id of features) {
-  assert.ok(["index.ts", "index.tsx"].some((file) => existsSync(path.join(root, "client/plugins", id, file))), `${id} client entry copied`);
+assert.deepEqual(
+  hostFeatureSettings(true).schema.parse({}),
+  { "mcp-toggle": true, "machine-status": true, "continue-after-error": true },
+  "machine status on for Linux",
+);
+assert.deepEqual(
+  hostFeatureSettings(false).schema.parse({}),
+  { "mcp-toggle": true, "machine-status": false, "continue-after-error": true },
+  "and off elsewhere",
+);
+for (const feature of FEATURES) {
+  const [runtime, entry] = feature.serverOnly ? ["server", "server entry"] : ["client", "client entry"];
+  assert.ok(["index.ts", "index.tsx"].some((file) => existsSync(path.join(root, runtime, "plugins", feature.id, file))), `${feature.id} ${entry} copied`);
 }
 function codeFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

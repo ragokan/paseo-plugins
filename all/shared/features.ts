@@ -17,6 +17,13 @@ export const FEATURES = [
     hint: "Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer",
   },
   { id: "machine-status", scope: "host", title: "Machine status", hint: "CPU, memory, disk, ports, processes and Docker for a Linux host" },
+  {
+    id: "continue-after-error",
+    scope: "host",
+    title: "Continue after error",
+    hint: "When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped",
+    serverOnly: true,
+  },
 ] as const;
 
 type Feature = (typeof FEATURES)[number];
@@ -36,9 +43,13 @@ export function hostFeatureSettings(linux: boolean) {
     id: "features",
     scope: "host",
     version: 1,
-    schema: z.object({ "mcp-toggle": z.boolean().default(true), "machine-status": z.boolean().default(linux) }),
+    schema: z.object({
+      "mcp-toggle": z.boolean().default(true),
+      "machine-status": z.boolean().default(linux),
+      "continue-after-error": z.boolean().default(true),
+    }),
   });
 }
 
 /** What the app uses when it cannot read a host's switches. */
-export const DEFAULT_HOST_FEATURES: HostFeatures = { "mcp-toggle": true, "machine-status": false };
+export const DEFAULT_HOST_FEATURES: HostFeatures = { "mcp-toggle": true, "machine-status": false, "continue-after-error": true };

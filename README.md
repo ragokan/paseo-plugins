@@ -9,6 +9,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux machine the daemon runs on. |
+| [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
 | [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
 

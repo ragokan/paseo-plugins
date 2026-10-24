@@ -23,6 +23,8 @@ const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
 const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "mcp-toggle": mcpToggle,
   "machine-status": machineStatus,
+  // Daemon only: it resumes agents on its own host and adds nothing to the app.
+  "continue-after-error": () => {},
 };
 const hostSettings = hostFeatureSettings(false);
 

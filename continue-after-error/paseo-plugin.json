@@ -1,0 +1,8 @@
+{
+  "id": "continue-after-error",
+  "name": "Continue after error",
+  "description": "When the daemon starts, resume the Claude and Codex agents whose last turn a daemon stop, crash or error cut short, but not the ones you stopped.",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}
