@@ -107,9 +107,11 @@ export function* loadedExports(modules: MetroModules): Generator<Record<string, 
 export function onModuleRun(modules: MetroModules, listener: ModuleListener): () => void {
   const existing = [...modules.values()].find((module) => isHook(module?.factory))?.factory as Hook | undefined;
   const listeners = existing?.listeners ?? new Set<ModuleListener>();
-  for (const module of modules.values()) {
+  // A callback per module, not a for loop: on iOS and Android, Hermes gives a loop's const one slot
+  // for every closure made in it, so each hook would run the last module's factory.
+  modules.forEach((module) => {
     const original = module?.factory;
-    if (!module || module.isInitialized || typeof original !== "function" || isHook(original)) continue;
+    if (!module || module.isInitialized || typeof original !== "function" || isHook(original)) return;
     const hook = function (this: unknown, ...args: unknown[]) {
       const result = original.apply(this, args);
       const exports = module.publicModule?.exports;
@@ -124,7 +126,7 @@ export function onModuleRun(modules: MetroModules, listener: ModuleListener): ()
       return result;
     };
     module.factory = Object.assign(hook, { original, listeners });
-  }
+  });
   listeners.add(listener);
   return () => {
     if (!listeners.delete(listener) || listeners.size > 0) return;

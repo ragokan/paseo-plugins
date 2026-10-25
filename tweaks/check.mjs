@@ -5,8 +5,10 @@
 // Paseo updates:
 //   npm run check [path/to/index-<hash>.js]
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -687,4 +689,47 @@ assert.equal(palette.projectCommandCenterRows, projectCommandCenterRows);
 assert.deepEqual(paletteOrder("done"), ["workspace:label:Done", "all:mark-as-done"]);
 globalThis.setTimeout = realSetTimeout;
 delete globalThis.__paseoHostRuntimeStore;
-console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, Mark as done first, and the tweaks in ${bundlePath}`);
+
+// The iOS and Android apps run the plugin on Hermes, which, unlike Node, gives a loop's let and const
+// one slot for every closure made in the loop. So onModuleRun runs there too, on Metro's require, with
+// a screen that requires another module as it runs, as New workspace's does. Metro's source, not the
+// web bundle's: its minified runtime shadows a name in a block, which Hermes does not keep apart.
+const hermes = path.join(path.dirname(require.resolve("react-native/package.json")), "sdks/hermesc/osx-bin/hermes");
+const { outputText: sidebarCode } = ts.transpileModule(readFileSync(path.join(root, "client/sidebar.ts"), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+});
+const hermesDir = mkdtempSync(path.join(tmpdir(), "tweaks-hermes-"));
+const hermesScript = path.join(hermesDir, "on-module-run.js");
+writeFileSync(hermesScript, `
+var global = globalThis, __DEV__ = false, __METRO_GLOBAL_PREFIX__ = "";
+if (typeof console === "undefined") globalThis.console = { warn: print };
+${readFileSync(require.resolve("metro-runtime/polyfills/require"), "utf8")}
+var sidebar = { exports: {} };
+(function (require, module, exports) {
+${sidebarCode}
+})(function () { return {}; }, sidebar, sidebar.exports);
+__d(function (global, require, importDefault, importAll, module, exports, deps) { exports.name = "leaf"; }, 1, []);
+__d(function (global, require, importDefault, importAll, module, exports, deps) { exports.useNewWorkspaceForm = function () {}; exports.leaf = require(deps[0]).name; }, 2, [1]);
+__d(function (global, require, importDefault, importAll, module, exports, deps) { exports.leaf = require(deps[1]).name; }, 3, [2, 1]);
+var result = { seen: [] };
+var stop = sidebar.exports.onModuleRun(sidebar.exports.metroModules(), function (exports) { result.seen.push(Object.keys(exports).join(",")); });
+try {
+  var screen = __r(2);
+  result.screen = Object.keys(screen);
+  result.leaf = screen.leaf;
+  stop();
+  result.last = __r(3).leaf;
+} catch (error) {
+  result.error = error.message;
+}
+print(JSON.stringify(result));
+`);
+const hermesRun = spawnSync(hermes, [hermesScript], { encoding: "utf8" });
+rmSync(hermesDir, { recursive: true, force: true });
+assert.equal(hermesRun.status, 0, hermesRun.stderr || hermesRun.error?.message);
+assert.deepEqual(
+  JSON.parse(hermesRun.stdout),
+  { seen: ["name", "useNewWorkspaceForm,leaf"], screen: ["useNewWorkspaceForm", "leaf"], leaf: "leaf", last: "leaf" },
+  "on Hermes each module runs its own factory, and the listener sees each as it runs until it stops",
+);
+console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, Mark as done first, and the tweaks, on Node and Hermes, in ${bundlePath}`);
