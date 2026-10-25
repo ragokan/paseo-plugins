@@ -1,0 +1,8 @@
+{
+  "id": "agent-titles",
+  "name": "Agent titles",
+  "description": "Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model, instead of the message's first 60 characters.",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}

@@ -11,6 +11,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux or macOS machine the daemon runs on, read only while its screen is on screen. |
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
+| [agent-titles](agent-titles) | Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
 | [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
 

@@ -1,0 +1,22 @@
+{
+  "name": "agent-titles",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.server.ts",
+    "server/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test server/*.test.mjs"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.13.0",
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}

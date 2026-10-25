@@ -41,6 +41,13 @@ export const FEATURES = [
     hint: "Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done",
     serverOnly: true,
   },
+  {
+    id: "agent-titles",
+    scope: "host",
+    title: "Agent titles",
+    hint: "Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model",
+    serverOnly: true,
+  },
 ] as const;
 
 type Feature = (typeof FEATURES)[number];
@@ -65,9 +72,16 @@ export function hostFeatureSettings(linux: boolean) {
       "machine-status": z.boolean().default(linux),
       "continue-after-error": z.boolean().default(true),
       "status-labels": z.boolean().default(true),
+      "agent-titles": z.boolean().default(true),
     }),
   });
 }
 
 /** What the app uses when it cannot read a host's switches. */
-export const DEFAULT_HOST_FEATURES: HostFeatures = { "mcp-toggle": true, "machine-status": false, "continue-after-error": true, "status-labels": true };
+export const DEFAULT_HOST_FEATURES: HostFeatures = {
+  "mcp-toggle": true,
+  "machine-status": false,
+  "continue-after-error": true,
+  "status-labels": true,
+  "agent-titles": true,
+};

@@ -27,6 +27,8 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "continue-after-error": () => {},
   // Daemon only: it labels its own host's workspaces, which the app shows like any label.
   "status-labels": () => {},
+  // Daemon only: it renames its own host's agents, which the app shows like any title.
+  "agent-titles": () => {},
 };
 const hostSettings = hostFeatureSettings(false);
 

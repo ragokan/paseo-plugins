@@ -1,5 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { gate } from "./server/gate";
+import agentTitles from "./server/plugins/agent-titles/index";
 import continueAfterError from "./server/plugins/continue-after-error/index";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
@@ -10,7 +11,7 @@ import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 export default function contribute(server: PluginServerContext) {
   const linux = process.platform === "linux";
   const settings = server.registerSettings(hostFeatureSettings(linux));
-  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true, "status-labels": true };
+  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true, "status-labels": true, "agent-titles": true };
   const update = (state: Awaited<ReturnType<typeof settings.read>>) => {
     if (state.status === "ready") features = state.values;
     else console.warn("[all] Features settings are unreadable; keeping the previous switches:", state.error);
@@ -47,6 +48,7 @@ export default function contribute(server: PluginServerContext) {
         return state.status === "ready" ? state.values.done : {};
       },
     }),
+    agentTitles(gate(server, "agent-titles", () => features["agent-titles"])),
   ];
 
   return async () => {

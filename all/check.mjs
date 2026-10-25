@@ -42,12 +42,12 @@ const features = FEATURES.map((feature) => feature.id);
 assert.ok(Object.values(DEFAULT_APP_FEATURES).every(Boolean), "app plugins start on");
 assert.deepEqual(
   hostFeatureSettings(true).schema.parse({}),
-  { "mcp-toggle": true, "machine-status": true, "continue-after-error": true, "status-labels": true },
+  { "mcp-toggle": true, "machine-status": true, "continue-after-error": true, "status-labels": true, "agent-titles": true },
   "machine status on for Linux",
 );
 assert.deepEqual(
   hostFeatureSettings(false).schema.parse({}),
-  { "mcp-toggle": true, "machine-status": false, "continue-after-error": true, "status-labels": true },
+  { "mcp-toggle": true, "machine-status": false, "continue-after-error": true, "status-labels": true, "agent-titles": true },
   "and off elsewhere",
 );
 for (const feature of FEATURES) {
