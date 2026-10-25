@@ -48,6 +48,12 @@ export const FEATURES = [
     hint: "Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model",
     serverOnly: true,
   },
+  {
+    id: "browseros-neo",
+    scope: "host",
+    title: "BrowserOS Neo",
+    hint: "See and drive the BrowserOS window on the host's Linux desktop, sidebar and all, after you press Connect; starts off",
+  },
 ] as const;
 
 type Feature = (typeof FEATURES)[number];
@@ -61,7 +67,10 @@ export const HOST_FEATURES = FEATURES.filter((feature): feature is Extract<Featu
 
 export const DEFAULT_APP_FEATURES = Object.fromEntries(APP_FEATURES.map((feature) => [feature.id, true])) as AppFeatures;
 
-/** The host switches, saved on each host. Machine status starts on only on Linux; a Mac switches it on. */
+/**
+ * The host switches, saved on each host. Machine status starts on only on Linux; a Mac switches it on.
+ * BrowserOS Neo starts off everywhere: it can resize the desktop and send it input, so a host opts in.
+ */
 export function hostFeatureSettings(linux: boolean) {
   return defineSettings({
     id: "features",
@@ -73,6 +82,7 @@ export function hostFeatureSettings(linux: boolean) {
       "continue-after-error": z.boolean().default(true),
       "status-labels": z.boolean().default(true),
       "agent-titles": z.boolean().default(true),
+      "browseros-neo": z.boolean().default(false),
     }),
   });
 }
@@ -84,4 +94,5 @@ export const DEFAULT_HOST_FEATURES: HostFeatures = {
   "continue-after-error": true,
   "status-labels": true,
   "agent-titles": true,
+  "browseros-neo": false,
 };

@@ -5,6 +5,7 @@ import { FeatureSettings } from "./client/settings";
 import { createSwitches, type Contribution } from "./client/switches";
 import { joinWorkspaceSettings } from "./client/plugins/tweaks/hosts";
 import { contributeApp as tweaks, contributeEveryCopy } from "./client/plugins/tweaks/index";
+import browserosNeo from "./client/plugins/browseros-neo/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
 import mcpToggle from "./client/plugins/mcp-toggle/index";
@@ -23,6 +24,7 @@ const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
 const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "mcp-toggle": mcpToggle,
   "machine-status": machineStatus,
+  "browseros-neo": browserosNeo,
   // Daemon only: it resumes agents on its own host and adds nothing to the app.
   "continue-after-error": () => {},
   // Daemon only: it labels its own host's workspaces, which the app shows like any label.
