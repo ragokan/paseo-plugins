@@ -1,0 +1,8 @@
+{
+  "id": "browseros-neo",
+  "name": "BrowserOS Neo",
+  "description": "See and drive the BrowserOS window on the daemon's Linux desktop, sidebar and all, from any Paseo app.",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}

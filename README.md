@@ -8,12 +8,13 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
+| [browseros-neo](browseros-neo) | The BrowserOS window on the daemon's Linux desktop, sidebar and all, live in Paseo: click, scroll and type into it from the desktop, the web or your phone. |
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux or macOS machine the daemon runs on, read only while its screen is on screen. |
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
 | [agent-titles](agent-titles) | Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
-| [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. |
+| [all](all) | All of the above in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |
 
 Each folder's `OVERVIEW.md` explains the plugin and its limits.
 
