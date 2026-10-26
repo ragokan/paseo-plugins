@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, rm, writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { MacHelperCache, helperPath, preparing, toolchainNeeded } from "./macos-helper.ts";
@@ -9,6 +10,13 @@ import { MacOSBackend } from "./macos.ts";
 import { macHelperSource } from "./macos-source.ts";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test("the helper has a stable path in Application Support across source updates", () => {
+  const first = new MacHelperCache({ source: "first" });
+  const changed = new MacHelperCache({ source: "changed" });
+  assert.equal(first.binary, join(homedir(), "Library", "Application Support", "Paseo", "browseros-neo", "helper"));
+  assert.equal(changed.binary, first.binary);
+});
 async function ready(cache) {
   for (let i = 0; i < 2000; i++) {
     const state = cache.prepare();
@@ -23,12 +31,14 @@ function runner(options = {}) {
   return { calls, execute: async (file, args, config) => {
     calls.push([file, args]);
     if (file.endsWith("sw_vers")) return { stdout: options.version ?? "14.0", stderr: "" };
+    if (args[0] === "--source-hash") return { stdout: await readFile(file, "utf8"), stderr: "" };
     if (args[0] === "--find") {
       if (options.missing) throw new Error("missing swiftc");
       return { stdout: "/usr/bin/swiftc", stderr: "" };
     }
     await options.compile?.(config);
-    await writeFile(args.at(-1), "binary", { mode: 0o755 });
+    const source = await readFile(args.find(arg => arg.endsWith(".swift")), "utf8");
+    await writeFile(args.at(-1), source.match(/print\("([a-f0-9]{64})"\)/)[1], { mode: 0o755 });
     return { stdout: "", stderr: "" };
   } };
 }
@@ -46,15 +56,26 @@ test("compile cache returns immediately, shares work, atomically publishes and r
     assert.equal(cache.prepare().reason, preparing);
     assert.ok(!(await readdir(dirname(cache.binary))).includes("helper"));
     release();
-    assert.deepEqual(await ready(cache), { binary: helperPath("fixture", root) });
+    assert.deepEqual(await ready(cache), { binary: helperPath(root) });
     assert.deepEqual(await readdir(dirname(cache.binary)), ["helper"]);
-    const reuse = runner();
+    const reuse = runner({ missing: true });
     const second = new MacHelperCache({ root, source: "fixture", execute: reuse.execute });
     assert.deepEqual(await ready(second), { binary: cache.binary });
-    assert.equal(reuse.calls.length, 1, "cached binary needs only the OS version check");
+    assert.equal(reuse.calls.length, 2, "reuse checks the OS version and embedded source hash without requiring swiftc");
     await second.stop();
     assert.equal(fake.calls.filter(([, args]) => args[0] === "swiftc").length, 1);
-    assert.notEqual(helperPath("different", root), cache.binary);
+    const upgrade = runner();
+    const changed = new MacHelperCache({ root, source: "different", execute: upgrade.execute });
+    assert.deepEqual(await ready(changed), { binary: cache.binary });
+    assert.equal(upgrade.calls.filter(([, args]) => args[0] === "swiftc").length, 1, "a source update rebuilds at the same executable path");
+    assert.equal(await readFile(cache.binary, "utf8"), createHash("sha256").update("different").digest("hex"));
+    await changed.stop();
+    const failing = runner({ compile: () => { throw new Error("synthetic compile failure"); } });
+    const failed = new MacHelperCache({ root, source: "broken update", execute: failing.execute });
+    assert.match((await ready(failed)).reason, /synthetic compile failure/);
+    assert.equal(await readFile(cache.binary, "utf8"), createHash("sha256").update("different").digest("hex"), "a failed update preserves the previous executable");
+    await failed.stop();
+    assert.deepEqual(await readdir(root), ["helper"], "source files and temporary binaries are removed");
   } finally { release(); await cache.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -92,6 +113,25 @@ test("stopping compilation aborts the compiler and never publishes a partial exe
   } finally { await cache.stop(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("stopping the helper tolerates a temporary directory that cannot be removed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "browseros-mac-cleanup-"));
+  const fake = runner({ compile: ({ signal }) => new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  }) });
+  const cache = new MacHelperCache({ root, execute: fake.execute });
+  try {
+    cache.prepare();
+    while (!fake.calls.some(([, args]) => args[0] === "swiftc")) await sleep(5);
+    await chmod(root, 0o500);
+    await assert.doesNotReject(cache.stop());
+    assert.match(cache.prepare().reason, /stopped/);
+  } finally {
+    await chmod(root, 0o700);
+    await cache.stop().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("macOS fitting shares debounce, honors actual clamped dimensions and restores after idle and stop", async () => {
   const calls = [];
   const backend = new MacOSBackend(undefined, () => {}, { debounceMs: 10, idleMs: 100, helper: {
@@ -120,6 +160,12 @@ test("native Swift pure checks cover keys, Mac shortcut modifiers, Retina sizing
   try {
     const state = await ready(cache);
     assert.ok(state.binary, state.reason);
+    const version = spawnSync(state.binary, ["--source-hash"], { encoding: "utf8" });
+    assert.equal(version.status, 0, version.stderr);
+    assert.equal(version.stdout.trim(), createHash("sha256").update(macHelperSource).digest("hex"));
+    const identity = spawnSync("/usr/bin/codesign", ["-d", "--verbose=2", state.binary], { encoding: "utf8" });
+    assert.equal(identity.status, 0, identity.stderr);
+    assert.match(identity.stderr, /^Identifier=helper$/m, "the temporary build name must not leak into the installed code identifier");
     const text = "x".repeat(19) + "😀 é 漢 👩‍🚒".repeat(5);
     const result = spawnSync(state.binary, ["--selftest"], { encoding: "utf8", input: JSON.stringify({
       keys: ["Enter", "Tab", " ", "Backspace", "Escape", "Delete", "Home", "End", "PageUp", "PageDown", "ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "F1", "F12", "a", "L", "/", "?", "unknown"],

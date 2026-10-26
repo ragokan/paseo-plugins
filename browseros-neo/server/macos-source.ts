@@ -189,7 +189,7 @@ struct SavedFrame {
     private var heldButtons: [Int: CGPoint] = [:]
     private var timer: Timer?
     private var requested: Set<String> = []
-    private let permissionDirectory = ProcessInfo.processInfo.environment["PASEO_BROWSEROS_PERMISSION_DIR"] ?? NSHomeDirectory() + "/Library/Caches/paseo-browseros-neo"
+    private let permissionDirectory = ProcessInfo.processInfo.environment["PASEO_BROWSEROS_PERMISSION_DIR"] ?? NSHomeDirectory() + "/Library/Application Support/Paseo/browseros-neo"
     private let permissionOwner = ProcessInfo.processInfo.environment["PASEO_BROWSEROS_PERMISSION_OWNER"] ?? ProcessInfo.processInfo.arguments[0]
     init() {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -207,8 +207,14 @@ struct SavedFrame {
         requested.insert(permission)
         try? FileManager.default.createDirectory(atPath: permissionDirectory, withIntermediateDirectories: true)
         let ownerID = SHA256.hash(data: Data(permissionOwner.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
-        let fd = Darwin.open(permissionDirectory + "/requested-" + ownerID + "-" + permission, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
-        if fd >= 0 { Darwin.close(fd); action() }
+        let marker = "/requested-" + ownerID + "-" + permission
+        let fd = Darwin.open(permissionDirectory + marker, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+        if fd >= 0 {
+            Darwin.close(fd)
+            // Preserve once-only requests when upgrading from the old cache path.
+            let legacyDirectory = NSHomeDirectory() + "/Library/Caches/paseo-browseros-neo"
+            if !FileManager.default.fileExists(atPath: legacyDirectory + marker) { action() }
+        }
     }
     private func permissions() -> String? {
         let screen = CGPreflightScreenCaptureAccess()

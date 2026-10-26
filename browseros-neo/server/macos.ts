@@ -4,7 +4,7 @@ import type { fitDisplay, launchBrowser, sendInput } from "../shared/contracts.t
 import { unavailable, type BrowserBackend, type CaptureInput, type ChangeState } from "./backend.ts";
 import { DisplayFitter } from "./display.ts";
 import { DesktopHelper, type HelperTransport } from "./helper.ts";
-import { MacHelperCache, macCacheRoot } from "./macos-helper.ts";
+import { MacHelperCache, macHelperRoot } from "./macos-helper.ts";
 
 type InputResult = RpcOutput<typeof sendInput>;
 
@@ -36,7 +36,7 @@ export class MacOSBackend implements BrowserBackend {
       if (!state.binary) return Promise.reject(new Error(state.reason));
       // Keep the process (and original AX geometry) alive. Swift expires only its SCStream.
       this.helper = new DesktopHelper(0, { executable: state.binary, args: [], env: {
-        ...process.env, PASEO_BROWSEROS_PERMISSION_DIR: macCacheRoot,
+        ...process.env, PASEO_BROWSEROS_PERMISSION_DIR: macHelperRoot,
         PASEO_BROWSEROS_PERMISSION_OWNER: process.execPath,
       } });
     }
