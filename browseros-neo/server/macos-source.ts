@@ -131,7 +131,10 @@ func isBrowser(_ app: NSRunningApplication) -> Bool {
         let name = $0.lowercased(); return name.contains("browseros") || name.contains("browserclaw")
     }
 }
-func matchingAX(_ target: BrowserWindow) -> AXUIElement? {
+func windowInfo() -> [[String: Any]]? {
+    CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+}
+func matchingAX(_ target: BrowserWindow, requireUnique: Bool = true) -> AXUIElement? {
     let app = AXUIElementCreateApplication(target.app.processIdentifier)
     guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else { return nil }
     let matches = windows.filter { window in
@@ -144,7 +147,8 @@ func matchingAX(_ target: BrowserWindow) -> AXUIElement? {
         guard let title = attribute($0, kAXTitleAttribute) as? String else { return false }
         return !target.title.isEmpty && cleanTitle(title) == cleanTitle(target.title)
     }
-    return titled.count == 1 ? titled[0] : nil
+    if titled.count == 1 { return titled[0] }
+    return requireUnique || matches.isEmpty ? nil : (titled.first ?? matches.first)
 }
 
 // Callbacks never encode or hash. Retain only the latest complete surface under the lock.
@@ -187,6 +191,7 @@ struct SavedFrame {
     private var originals: [CGWindowID: (AXUIElement, CGRect, pid_t)] = [:]
     private var heldKeys: Set<CGKeyCode> = []
     private var heldButtons: [Int: CGPoint] = [:]
+    private var heldWindow: String?
     private var timer: Timer?
     private var requested: Set<String> = []
     private let permissionDirectory = ProcessInfo.processInfo.environment["PASEO_BROWSEROS_PERMISSION_DIR"] ?? NSHomeDirectory() + "/Library/Application Support/Paseo/browseros-neo"
@@ -230,7 +235,7 @@ struct SavedFrame {
     }
     func windows() -> [BrowserWindow] {
         let apps = Dictionary(uniqueKeysWithValues: NSWorkspace.shared.runningApplications.filter(isBrowser).map { ($0.processIdentifier, $0) })
-        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let info = windowInfo() ?? []
         var result: [BrowserWindow] = []
         for item in info {
             guard number(item, kCGWindowLayer as String, -1) == 0,
@@ -240,12 +245,12 @@ struct SavedFrame {
             let id = CGWindowID(number(item, kCGWindowNumber as String))
             let title = item[kCGWindowName as String] as? String ?? ""
             let provisional = BrowserWindow(id: id, app: app, title: title, frame: frame, minimized: false, focused: false)
-            let ax = AXIsProcessTrusted() ? matchingAX(provisional) : nil
-            let minimized = ax.flatMap { attribute($0, kAXMinimizedAttribute) as? Bool } ?? false
-            let focused = app.isActive && ax.map { window in
-                guard let current = attribute(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute) else { return false }
-                return CFEqual(current, window)
-            } == true
+            // Chromium keeps invisible layer-0 surfaces after its last window
+            // closes. Only standard AX windows belong in the viewer/picker.
+            guard let ax = matchingAX(provisional, requireUnique: false),
+                  attribute(ax, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole else { continue }
+            let minimized = attribute(ax, kAXMinimizedAttribute) as? Bool ?? false
+            let focused = self.focused(provisional, ax)
             result.append(BrowserWindow(id: id, app: app, title: title, frame: frame, minimized: minimized, focused: focused))
         }
         return result.sorted {
@@ -434,6 +439,7 @@ struct SavedFrame {
     }
     private func activate(_ target: BrowserWindow) async throws -> AXUIElement {
         guard let ax = matchingAX(target) else { throw HelperError("Accessibility could not identify the exact BrowserOS window; no input was sent.") }
+        if !target.minimized && focused(target, ax) { return ax }
         if target.minimized { _ = AXUIElementSetAttributeValue(ax, kAXMinimizedAttribute as CFString, kCFBooleanFalse) }
         target.app.activate(options: [.activateIgnoringOtherApps])
         let app = AXUIElementCreateApplication(target.app.processIdentifier)
@@ -456,33 +462,64 @@ struct SavedFrame {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: CGMouseButton(rawValue: UInt32(button))!) else { throw HelperError("Could not create mouse event.") }
         event.setIntegerValueField(.mouseEventClickState, value: Int64(count)); event.post(tap: .cghidEventTap)
         if down { heldButtons[button] = point } else { heldButtons.removeValue(forKey: button) }
+        if heldButtons.isEmpty { heldWindow = nil }
     }
     func releaseInput() {
         for code in Array(heldKeys) { try? keyEvent(code, false) }
         for (button, point) in heldButtons { try? mouseEvent(button, false, point) }
-        heldButtons.removeAll(); heldKeys.removeAll()
+        heldButtons.removeAll(); heldKeys.removeAll(); heldWindow = nil
     }
     private func input(_ params: [String: Any]) async throws -> [String: Any] {
         do {
+            let events = params["events"] as? [[String: Any]] ?? []
+            // Blur/disconnect releases cannot activate a window (even one that
+            // just closed), or release buttons this helper never held.
+            if events.allSatisfy({ $0["type"] as? String == "up" }) {
+                guard heldWindow == params["windowId"] as? String else { return ["ok": true, "error": null] }
+                for event in events {
+                    let button = ["left": 0, "right": 1, "middle": 2][event["button"] as? String ?? "left"] ?? 0
+                    if let point = heldButtons[button] { try mouseEvent(button, false, point) }
+                }
+                return ["ok": true, "error": null]
+            }
             let target = try selected(params["windowId"] as? String ?? "")
-            let ax = try await activate(target)
-            for event in params["events"] as? [[String: Any]] ?? [] {
+            let ax: AXUIElement
+            if events.contains(where: { $0["type"] as? String != "move" && $0["type"] as? String != "up" }) {
+                if heldWindow != nil && heldWindow != target.hex { releaseInput() }
+                ax = try await activate(target)
+            } else {
+                // Passive updates may use existing focus, but cannot take it
+                // from another app or warp its cursor into BrowserOS.
+                guard let current = matchingAX(target), focused(target, current) else {
+                    if heldWindow == target.hex { releaseInput() }
+                    return ["ok": true, "error": null]
+                }
+                if heldWindow != nil && heldWindow != target.hex { releaseInput() }
+                ax = current
+            }
+            for event in events {
                 guard focused(target, ax) else { throw HelperError("The BrowserOS window lost focus; remaining input was stopped.") }
                 let kind = event["type"] as? String ?? ""
                 if ["move", "down", "up", "click", "scroll"].contains(kind) {
+                    let button = ["left": 0, "right": 1, "middle": 2][event["button"] as? String ?? "left"] ?? 0
+                    if kind == "up" && (heldButtons[button] == nil || heldWindow != target.hex) { continue }
                     guard let frame = axFrame(ax), let x = event["x"] as? Double, let y = event["y"] as? Double, x.isFinite, y.isFinite else { throw HelperError("Invalid BrowserOS pointer coordinates.") }
                     let point = CGPoint(x: frame.minX + max(0, min(frame.width - 1, x)), y: frame.minY + max(0, min(frame.height - 1, y)))
                     let held = heldButtons.keys.sorted().first
                     let move: CGEventType = held == 0 ? .leftMouseDragged : held == 1 ? .rightMouseDragged : held == nil ? .mouseMoved : .otherMouseDragged
                     CGEvent(mouseEventSource: nil, mouseType: move, mouseCursorPosition: point, mouseButton: CGMouseButton(rawValue: UInt32(held ?? 0))!)?.post(tap: .cghidEventTap)
                     if let held = held { heldButtons[held] = point }
-                    let button = ["left": 0, "right": 1, "middle": 2][event["button"] as? String ?? "left"] ?? 0
                     if kind == "click" {
                         for count in 1...max(1, min(3, number(event, "count", 1))) {
+                            guard focused(target, ax) else { throw HelperError("The BrowserOS window lost focus; remaining clicks were stopped.") }
+                            heldWindow = target.hex
                             try mouseEvent(button, true, point, count); try mouseEvent(button, false, point, count)
                             try await Task.sleep(nanoseconds: 40_000_000)
                         }
-                    } else if kind == "down" || kind == "up" { try mouseEvent(button, kind == "down", point) }
+                    } else if kind == "down" || kind == "up" {
+                        if kind == "down" { heldWindow = target.hex }
+                        try mouseEvent(button, kind == "down", point)
+                    }
                     else if kind == "scroll" {
                         CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: -Int32(number(event, "dy")), wheel2: -Int32(number(event, "dx")), wheel3: 0)?.post(tap: .cghidEventTap)
                     }
@@ -534,7 +571,13 @@ struct SavedFrame {
         var errors: [String] = []
         for (id, (window, frame, pid)) in originals {
             // A closed window is no longer ours to restore, even if CG reuses its numeric id.
-            guard let target = windows().first(where: { $0.id == id && $0.app.processIdentifier == pid }) else { originals.removeValue(forKey: id); continue }
+            guard let target = windows().first(where: { $0.id == id && $0.app.processIdentifier == pid }) else {
+                // A failed AX listing must not erase a live window's original.
+                if let info = windowInfo(), !info.contains(where: { number($0, kCGWindowNumber as String) == Int(id) && number($0, kCGWindowOwnerPID as String) == Int(pid) }) {
+                    originals.removeValue(forKey: id)
+                } else { errors.append("Accessibility could not identify the BrowserOS window to restore; its original frame is retained.") }
+                continue
+            }
             guard let current = matchingAX(target), CFEqual(current, window) else {
                 errors.append("Accessibility could not identify the BrowserOS window to restore; its original frame is retained.")
                 continue

@@ -9,6 +9,7 @@ import { MacHelperCache, preparing } from "./macos-helper.ts";
 import { DesktopHelper } from "./helper.ts";
 import { MacOSBackend } from "./macos.ts";
 import { BrowserDaemon } from "./daemon.ts";
+import { macHelperSource } from "./macos-source.ts";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(read, timeout = 15000) {
@@ -45,13 +46,17 @@ async function connect(url) {
 test("live macOS frames, refinement, menus, native input, fitting, restore and performance", {
   skip: process.platform !== "darwin" || process.env.PASEO_BROWSEROS_MAC_TEST !== "1", timeout: 180000,
 }, async t => {
-  const cache = new MacHelperCache();
+  const directory = await mkdtemp(join(tmpdir(), "browseros-mac-live-"));
+  const profile = join(directory, "profile");
+  // Scope discovery before the first capture, including every default-window
+  // fallback and fit. A larger user window can never become a test target.
+  const source = macHelperSource.replace("func isBrowser(_ app: NSRunningApplication) -> Bool {", 'func isBrowser(_ app: NSRunningApplication) -> Bool {\n    guard app.processIdentifier == pid_t(ProcessInfo.processInfo.environment["PASEO_BROWSEROS_TEST_PID"] ?? "-1") else { return false }')
+    .replace("    [app.bundleIdentifier,", "    return [app.bundleIdentifier,");
+  const cache = new MacHelperCache({ root: join(directory, "native"), source });
   const state = await until(() => { const value = cache.prepare(); return value.reason === preparing ? null : value; }, 180000);
   assert.ok(state.binary, state.reason);
   const permissions = JSON.parse(execFileSync(state.binary, ["--permissions"], { encoding: "utf8" }));
   assert.deepEqual(permissions, { screenRecording: true, accessibility: true }, "Grant permissions to the actual test host before opting in");
-  const directory = await mkdtemp(join(tmpdir(), "browseros-mac-live-"));
-  const profile = join(directory, "profile");
   const app = process.env.PASEO_BROWSEROS_MAC_APP ?? "/Applications/BrowserOS neo.app";
   await access(app);
   let browser, page, backend, daemon, helperPid, ownedWindowId;
@@ -91,7 +96,10 @@ test("live macOS frames, refinement, menus, native input, fitting, restore and p
     const { windowId } = await browser.call("Browser.getWindowForTarget", { targetId: targets.targetId });
     await browser.call("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
     await browser.call("Browser.setWindowBounds", { windowId, bounds: { left: 0, top: 30, width: 2200, height: 1300 } });
-    const transport = new DesktopHelper(0, { executable: state.binary, args: [], env: { ...process.env, PASEO_BROWSEROS_PERMISSION_OWNER: process.execPath } });
+    const ownProcess = execFileSync("/bin/ps", ["-axo", "pid=,args="], { encoding: "utf8" }).split("\n").find(line => line.replace(/^\s*\d+\s+/, "").startsWith(app + "/Contents/MacOS/") && line.includes("--user-data-dir=" + profile));
+    assert.ok(ownProcess, "The isolated BrowserOS process must exist before capture");
+    const ownPid = ownProcess.trim().split(/\s+/)[0];
+    const transport = new DesktopHelper(0, { executable: state.binary, args: [], env: { ...process.env, PASEO_BROWSEROS_PERMISSION_OWNER: process.execPath, PASEO_BROWSEROS_TEST_PID: ownPid } });
     backend = new MacOSBackend(cache, () => {}, { helper: transport, debounceMs: 20, idleMs: 1000 });
     daemon = new BrowserDaemon(backend);
     let first = await until(async () => {
