@@ -58,7 +58,7 @@ export function McpScreen({ theme, layout }: PluginScreenProps) {
           </View>
           <Text style={muted}>
             Turn Claude's and Codex's MCP servers on or off. New sessions start with this set; to change a running chat,
-            use the mcp servers pill above its composer.
+            use the mcp pill above its composer.
           </Text>
         </View>
 
