@@ -635,6 +635,20 @@ assert.deepEqual(paletteOrder("done"), ["workspace:label:Done", "all:mark-as-don
 assert.deepEqual(paletteOrder("mark"), ["all:mark-all-read", "all:mark-as-done"]);
 assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"]);
 
+// Composer pills in Paseo's own plugin button store: Shell Yeah's Run pill, there before the plugin
+// starts, beside the mcp pill and another plugin's pill also named run.
+const { pluginButtonStore: buttons } = metroRequire(idOf('Object.defineProperty(e,"pluginButtonStore",{enumerable:!0,get:function(){return t}})'));
+const installation = (id) => ({ id, serverId: BOX, i18n: { resolve: (text) => text, subscribe: () => () => {} } });
+const shellYeah = installation("shell-yeah");
+const addPill = (plugin, id, label, agentId = "agent-1") =>
+  buttons.addComposerPill(plugin, { id, workspaceId: "ws", agentId, button: { title: label, label, icon: "SquareTerminal", behavior: { kind: "action", onPress() {} } } });
+const runPill = addPill(shellYeah, "run", "Run");
+addPill(installation("all"), "mcp", "mcp (3)");
+addPill(installation("other"), "run", "Run");
+const pillLabels = () => buttons.getSnapshot().map((entry) => `${entry.installation.id}:${entry.button.label}`);
+const publish = buttons.publish;
+assert.deepEqual(pillLabels(), ["shell-yeah:Run", "all:mcp (3)", "other:Run"]);
+
 // The New workspace screen's module runs later than the rest: its tweak lands as it runs, before the
 // screen draws with it.
 const registry = new Map([...metroModules(), ["badge", loaded(badgeModule)]]);
@@ -675,13 +689,24 @@ assert.deepEqual(paletteOrder("idle"), ["all:mark-as-done"], "a keyword match ke
 assert.deepEqual(paletteOrder(""), ["all:mark-all-read", "all:mark-as-done"], "an empty query keeps Paseo's order");
 const doneRows = palette.projectCommandCenterRows(palette.buildContributionSections(paletteItems, "done"), ROW_SIZES).rows;
 assert.deepEqual(doneRows.map((row) => row.kind === "section" ? `section:${row.title ?? ""}` : row.key), ["all:mark-as-done", "section:", "workspace:label:Done"], "no empty all section left behind");
+// Shell Yeah's pill reads run, whenever it was added, updated or opened.
+assert.deepEqual(pillLabels(), ["shell-yeah:run", "all:mcp (3)", "other:Run"], "the other plugins' pills as they are");
+addPill(shellYeah, "run", "Run", "agent-2");
+runPill.update({ label: "Run" });
+buttons.setOpen(buttons.getSnapshot()[0].key, true);
+assert.deepEqual(pillLabels(), ["shell-yeah:run", "all:mcp (3)", "other:Run", "shell-yeah:run"]);
+assert.equal(buttons.getSnapshot()[0].open, true);
 assert.equal(pendingModule.factory, pendingFactory, "all found, the modules not run yet as they were");
 for (const look of looks.splice(0)) look.callback();
 assert.equal(looks.length, 0, "all found, no more looking");
 // The last copy to unload puts Paseo's own back.
 untweak();
 assert.deepEqual(kinds(rowInput()), ["host", "project", "labels"]);
+assert.deepEqual(pillLabels(), ["shell-yeah:run", "all:mcp (3)", "other:Run", "shell-yeah:run"]);
 untweakSecondHost();
+assert.equal(buttons.publish, publish);
+assert.deepEqual(pillLabels(), ["shell-yeah:Run", "all:mcp (3)", "other:Run", "shell-yeah:Run"], "Paseo's labels back");
+assert.equal(buttons.getSnapshot()[0].open, true);
 assert.equal(metaRow.selectMetaRowItems, selectMetaRowItems);
 assert.equal(badgeModule.HostBadge({ badge: { serverId: BOX, label: "ragdevbox", showLabel: true } }).props.children.length, 2);
 assert.equal(formModule.useNewWorkspaceForm("desktop"), forms.desktop);

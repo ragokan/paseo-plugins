@@ -13,7 +13,7 @@ export const FEATURES = [
     id: "tweaks",
     scope: "app",
     title: "Tweaks",
-    hint: "Hide the sidebar's workspaces you pick, Idle and Waiting groups with Mark as done first in the command palette, Idle's own icon, host names without the server icon, the machine before the folder, and a gray Done label",
+    hint: "Hide the sidebar's workspaces you pick, Idle and Waiting groups with Mark as done first in the command palette, Idle's own icon, host names without the server icon, the machine before the folder, a gray Done label, and Shell Yeah's Run pill as run",
   },
   {
     id: "mcp-toggle",
