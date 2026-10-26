@@ -4,6 +4,7 @@ import { joinAgents, readWaiting } from "./client/agents";
 import { joinWorkspaceSettings, markDone, readDone } from "./client/hosts";
 import { waitsInIdle } from "./client/idle";
 import { HideWorkspacesSettings } from "./client/screen";
+import { addShortcut } from "./client/shortcut";
 import { findSidebarModules, metroModules, patch } from "./client/sidebar";
 import { applyTweaks } from "./client/tweaks";
 import { stylePage } from "./client/web";
@@ -47,6 +48,16 @@ export function contributeApp(client: PluginClientContext) {
   };
 }
 
+// Sends a workspace of this copy's host from Idle to Done, or throws why it cannot.
+function markAsDone(client: PluginClientContext, workspace: { id: string; status: string; statusEnteredAt: string | null }) {
+  const enteredAt = workspace.statusEnteredAt === null ? undefined : Date.parse(workspace.statusEnteredAt);
+  const inIdle = waitsInIdle(workspace.id, enteredAt, Date.now(), readDone()) && !readWaiting().has(workspace.id);
+  if (workspace.status !== "done" || !inIdle) {
+    throw new Error("This workspace is not in Idle");
+  }
+  return markDone(client, workspace.id, enteredAt!);
+}
+
 /**
  * "Mark as done" in the command palette sends the open workspace from Idle to Done. Paseo offers a
  * copy's commands only on its own host's workspaces, so every copy adds it.
@@ -58,27 +69,34 @@ export function addMarkAsDone(client: PluginClientContext) {
     icon: "CircleCheck",
     keywords: ["idle", "done", "status", "sidebar"],
     context: "workspace",
-    onSelect: ({ workspace }) => {
-      const enteredAt = workspace.statusEnteredAt === null ? undefined : Date.parse(workspace.statusEnteredAt);
-      // Paseo shows the error in a toast.
-      const inIdle = waitsInIdle(workspace.id, enteredAt, Date.now(), readDone()) && !readWaiting().has(workspace.id);
-      if (workspace.status !== "done" || !inIdle) {
-        throw new Error("This workspace is not in Idle");
-      }
-      return markDone(client, workspace.id, enteredAt!);
-    },
+    // Paseo shows the error in a toast.
+    onSelect: ({ workspace }) => markAsDone(client, workspace),
   });
 }
 
 /**
- * What every copy adds for its own host, whichever copy runs the sidebar patch: Mark as done, and the
- * host's agents, for Waiting.
+ * ⌘⇧D, Ctrl+Shift+D off macOS, does Mark as done on the open workspace in the desktop and web apps.
+ * The workspace is read from its host as the key is pressed; an error only goes to the console.
+ */
+export function addMarkAsDoneShortcut(client: PluginClientContext) {
+  return addShortcut(client, async (workspaceId) => {
+    const workspace = await client.paseo.workspaces.ref(workspaceId).refresh();
+    if (!workspace) throw new Error(`Workspace ${workspaceId} is not on this host`);
+    await markAsDone(client, workspace);
+  });
+}
+
+/**
+ * What every copy adds for its own host, whichever copy runs the sidebar patch: Mark as done, from
+ * the command palette and ⌘⇧D, and the host's agents, for Waiting.
  */
 export function contributeEveryCopy(client: PluginClientContext) {
   const removeMarkAsDone = addMarkAsDone(client);
+  const removeShortcut = addMarkAsDoneShortcut(client);
   const leaveAgents = joinAgents(client);
   return () => {
     leaveAgents();
+    removeShortcut();
     removeMarkAsDone();
   };
 }

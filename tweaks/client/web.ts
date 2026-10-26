@@ -9,6 +9,26 @@ declare const document: {
   createElement(tag: "style"): StyleElement;
   head: { appendChild(node: StyleElement): void };
 };
+// A key press, as the page's keydown event has it.
+export interface KeyPress {
+  key: string;
+  code: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  repeat: boolean;
+  isComposing: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+}
+type KeyListener = (event: KeyPress) => void;
+declare const window: {
+  location: { pathname: string };
+  addEventListener(type: "keydown", listener: KeyListener, capture: boolean): void;
+  removeEventListener(type: "keydown", listener: KeyListener, capture: boolean): void;
+};
+declare const navigator: { platform: string };
 
 // Idle's group in the sidebar, whose icon is Done's: a check in a circle, in the theme's muted text color.
 const IDLE_ICON = '[data-testid="sidebar-status-group-idle"] svg:has(circle)';
@@ -34,4 +54,24 @@ export function stylePage(): () => void {
   style.textContent = [IDLE_CSS, DONE_CSS].join("\n");
   document.head.appendChild(style);
   return () => style.remove();
+}
+
+/**
+ * Calls listener with every key pressed in the desktop and web apps' window, before the page's own
+ * handlers see it. Returns a function that stops.
+ */
+export function listenForKeys(listener: KeyListener): () => void {
+  if (Platform.OS !== "web") return () => {};
+  window.addEventListener("keydown", listener, true);
+  return () => window.removeEventListener("keydown", listener, true);
+}
+
+/** The page's path, which is the app's route on the desktop and web apps. */
+export function pagePath(): string | null {
+  return Platform.OS === "web" ? window.location.pathname : null;
+}
+
+/** Whether the desktop or web app runs on a Mac. */
+export function onMac(): boolean {
+  return Platform.OS === "web" && /^Mac/.test(navigator.platform);
 }

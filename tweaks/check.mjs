@@ -62,7 +62,7 @@ function loadPlugin(file) {
 const { findSidebarModules, hideProjects, patch } = loadPlugin("client/sidebar.ts");
 const { joinWorkspaceSettings, readDone, readHidden, setHidden } = loadPlugin("client/hosts.ts");
 const { joinAgents, readWaiting, waitingWorkspaces } = loadPlugin("client/agents.ts");
-const { addMarkAsDone } = loadPlugin("index.client.tsx");
+const { addMarkAsDone, addMarkAsDoneShortcut } = loadPlugin("index.client.tsx");
 const { default: contributeServer } = loadPlugin("index.server.ts");
 
 assert.throws(findSidebarModules, /Metro runtime not found/);
@@ -188,6 +188,8 @@ function fakeHost(label, stored = {}) {
     agentRequests: [],
     agentObservers: [],
     agentsReleased: false,
+    serverId: `srv_${label}`,
+    workspaces: new Map(),
   };
   host.client = {
     async rpc(contract, input) {
@@ -210,6 +212,12 @@ function fakeHost(label, stored = {}) {
       return () => host.commands.splice(host.commands.indexOf(item), 1);
     },
     paseo: {
+      hosts: {
+        list: async () => ({ self: { serverId: host.serverId, label }, hosts: [] }),
+      },
+      workspaces: {
+        ref: (id) => ({ refresh: async () => host.workspaces.get(id) ?? null }),
+      },
       agents: {
         async list(options) {
           host.agentRequests.push(options);
@@ -466,6 +474,141 @@ box.save({ done: { ...box.stored.done, recent: t0 - 0.5 * HOUR } });
 box.changed("workspaces");
 await settle();
 assert.deepEqual(statusGroups(statusLayout()).slice(-1), [["done", DONE, ["recent", "fix-login", "old-docs", "never"]]]);
+
+// ⌘⇧D, on the desktop and web apps, runs Mark as done on the open workspace: the copy for the host
+// the page's route names looks the workspace up there. Paseo's own binding for the keys, voice mode,
+// steps aside while any copy has the shortcut, and comes back after.
+const keyboard = metroRequire(idOf(".buildEffectiveBindings=function"));
+const routes = metroRequire(idOf(".parseHostWorkspaceRouteFromPathname="));
+const keyListeners = [];
+const page = { pathname: "/" };
+globalThis.window = {
+  ...globalThis.window,
+  location: page,
+  addEventListener: (type, listener, capture) => keyListeners.push({ type, listener, capture }),
+  removeEventListener: (type, listener, capture) => {
+    const at = keyListeners.findIndex((entry) => entry.type === type && entry.listener === listener && entry.capture === capture);
+    if (at >= 0) keyListeners.splice(at, 1);
+  },
+};
+const realNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+const usePlatform = (platform) => Object.defineProperty(globalThis, "navigator", { value: { platform }, configurable: true });
+usePlatform("MacIntel");
+const press = (keys = {}) => {
+  const event = { key: "D", code: "KeyD", metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, repeat: false, isComposing: false, prevented: false, stopped: false, ...keys };
+  event.preventDefault = () => void (event.prevented = true);
+  event.stopPropagation = () => void (event.stopped = true);
+  for (const { listener } of [...keyListeners]) listener(event);
+  return event;
+};
+// What Paseo's own shortcut handler does with a key press in the composer, with the bindings it
+// built before the plugin started, as the app keeps them until the overrides change.
+const liveBindings = keyboard.buildEffectiveBindings({});
+const paseoAction = (keys = {}, isMac = true) => {
+  const event = { key: "D", code: "KeyD", metaKey: isMac, ctrlKey: !isMac, altKey: false, shiftKey: true, repeat: false, ...keys };
+  const { match } = keyboard.resolveKeyboardShortcut({
+    event,
+    context: { isMac, isDesktop: true, focusScope: "message-input", commandCenterOpen: false },
+    chordState: { candidateIndices: [], step: 0, timeoutId: null },
+    onChordReset: () => {},
+    bindings: liveBindings,
+  });
+  return match?.payload?.kind ?? match?.action ?? null;
+};
+const openWorkspace = (host, workspaceId) => (page.pathname = routes.buildHostWorkspaceRoute(host.serverId, workspaceId));
+const workspace = (id, status, hoursAgo) => ({ id, status, statusEnteredAt: new Date(t0 - hoursAgo * HOUR).toISOString() });
+assert.equal(paseoAction(), "voice-toggle");
+assert.equal(paseoAction({}, false), "voice-toggle");
+// On iOS and Android there are no keys to press: nothing asks the host, nothing listens.
+const askedBefore = box.client.paseo.hosts.list;
+let asked = 0;
+box.client.paseo.hosts.list = (...args) => (asked++, askedBefore(...args));
+addMarkAsDoneShortcut(box.client)();
+await settle();
+assert.equal(asked, 0);
+box.client.paseo.hosts.list = askedBefore;
+
+stubs["react-native"].Platform.OS = "web";
+const stopShortcuts = [mini, box].map((host) => addMarkAsDoneShortcut(host.client));
+await settle();
+assert.equal(keyListeners.length, 1, "one listener for every copy");
+assert.deepEqual([keyListeners[0].type, keyListeners[0].capture], ["keydown", true], "before the page's own handlers");
+assert.equal(paseoAction(), null, "voice mode steps aside");
+assert.equal(paseoAction({}, false), null, "on Windows and Linux too");
+assert.equal(paseoAction({ shiftKey: false }), "dictation-toggle", "Paseo's other keys stay");
+
+box.workspaces.set("ship-it", workspace("ship-it", "done", 1));
+box.workspaces.set("still-building", workspace("still-building", "running", 1));
+mini.workspaces.set("mini-idle", workspace("mini-idle", "done", 3));
+const doneBefore = { ...box.stored.done };
+openWorkspace(box, "ship-it");
+let event = press();
+assert.ok(event.prevented && event.stopped);
+await settle();
+assert.deepEqual(box.stored.done, { ...doneBefore, "ship-it": t0 - 1 * HOUR }, "marked on its own host");
+assert.ok(!("mini-idle" in mini.stored.done));
+openWorkspace(mini, "mini-idle");
+press();
+await settle();
+assert.deepEqual(mini.stored.done, { "mini-idle": t0 - 3 * HOUR }, "and another host's on that host");
+// Held down, the repeats do nothing more; nor do other keys.
+const writesBefore = [mini.writes, box.writes];
+openWorkspace(box, "ship-it");
+assert.ok(press({ repeat: true }).prevented);
+assert.ok(!press({ shiftKey: false }).prevented);
+assert.ok(!press({ metaKey: false, ctrlKey: true }).prevented, "Ctrl+Shift+D is not the Mac's");
+assert.ok(!press({ altKey: true }).prevented);
+await settle();
+assert.deepEqual([mini.writes, box.writes], writesBefore);
+// Away from a workspace the keys are left alone.
+page.pathname = "/settings/shortcuts";
+assert.ok(!press().prevented);
+// What is not in Idle stays, with a warning; so does a workspace its host no longer has, and one
+// on a host without the plugin.
+const shortcutWarnings = [];
+const realWarn = console.warn;
+console.warn = (...args) => shortcutWarnings.push(args.join(" "));
+openWorkspace(box, "still-building");
+assert.ok(press().prevented);
+openWorkspace(box, "archived");
+press();
+page.pathname = routes.buildHostWorkspaceRoute("srv_elsewhere", "ship-it");
+assert.ok(press().prevented);
+await settle();
+console.warn = realWarn;
+assert.deepEqual([mini.writes, box.writes], writesBefore);
+assert.equal(shortcutWarnings.length, 2);
+assert.match(shortcutWarnings[0], /This workspace is not in Idle/);
+assert.match(shortcutWarnings[1], /not on this host/);
+
+// The last copy to stop takes the listener off and gives voice mode its keys back.
+stopShortcuts[0]();
+assert.equal(keyListeners.length, 1);
+stopShortcuts[1]();
+assert.equal(keyListeners.length, 0);
+assert.equal(paseoAction(), "voice-toggle");
+assert.equal(paseoAction({}, false), "voice-toggle");
+// A copy that stops before its host answers adds nothing.
+addMarkAsDoneShortcut(box.client)();
+await settle();
+assert.equal(keyListeners.length, 0);
+
+// Off macOS the keys are Ctrl+Shift+D, as Paseo pairs its own.
+usePlatform("Linux x86_64");
+const stopLinux = addMarkAsDoneShortcut(box.client);
+await settle();
+box.workspaces.set("linux-idle", workspace("linux-idle", "done", 2));
+openWorkspace(box, "linux-idle");
+assert.ok(!press().prevented, "not ⌘⇧D");
+assert.ok(press({ metaKey: false, ctrlKey: true }).prevented);
+await settle();
+assert.equal(box.stored.done["linux-idle"], t0 - 2 * HOUR);
+stopLinux();
+assert.equal(keyListeners.length, 0);
+assert.equal(paseoAction({}, false), "voice-toggle");
+stubs["react-native"].Platform.OS = "ios";
+if (realNavigator) Object.defineProperty(globalThis, "navigator", realNavigator);
+else delete globalThis.navigator;
 
 // A workspace in Done whose agent waits on a subagent, one it started that is still working, or one
 // those started, sits in Waiting above Idle with Working's icon, whichever host the subagent is on.
@@ -770,4 +913,4 @@ assert.deepEqual(
   { seen: ["name", "useNewWorkspaceForm,leaf"], screen: ["useNewWorkspaceForm", "leaf"], leaf: "leaf", last: "leaf" },
   "on Hermes each module runs its own factory, and the listener sees each as it runs until it stops",
 );
-console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, Mark as done first, and the tweaks, on Node and Hermes, in ${bundlePath}`);
+console.log(`ok: sidebar layout, order store, hiding, Waiting and Idle, Mark as done first and on ⌘⇧D, and the tweaks, on Node and Hermes, in ${bundlePath}`);
