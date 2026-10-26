@@ -1,4 +1,5 @@
 import { cloneElement, isValidElement, type ReactNode } from "react";
+import { guarded } from "./guard";
 import { loadedExports, onModuleRun, type MetroModules } from "./sidebar";
 
 declare function setTimeout(callback: () => void, ms: number): unknown;
@@ -150,7 +151,7 @@ export function restoreRunPill(entries: ButtonEntry[]): ButtonEntry[] {
 
 // The pills already there: lowercase while publish is wrapped, as Paseo made them once it is not.
 function relabelPills(store: ButtonStore) {
-  const entries = "original" in store.publish ? lowercaseRunPill(store.entries) : restoreRunPill(store.entries);
+  const entries = guarded("run pill", store.entries, "original" in store.publish ? lowercaseRunPill : restoreRunPill);
   if (entries !== store.entries) store.publish(entries);
 }
 
@@ -159,13 +160,14 @@ type HostBadge = (props: { badge: { showLabel: boolean } }) => unknown;
 type UseNewWorkspaceForm = (input: unknown) => unknown;
 type ProjectCommandCenterRows = (sections: PaletteSection[], sizes: unknown) => unknown;
 
-// What each tweak wraps: the module that exports the function, found by its export.
+// What each tweak wraps: the module that exports the function, found by its export. Each runs Paseo's
+// own as it is and guards only its change, so a hook's calls stay the same if the change fails.
 const TWEAKS = [
   {
     // Sidebar rows: the machine before the folder.
     find: (exports: Record<string, unknown>) => typeof exports.selectMetaRowItems === "function",
     name: "selectMetaRowItems",
-    wrap: (original: SelectMetaRowItems) => (input: unknown) => hostFirst(original(input)),
+    wrap: (original: SelectMetaRowItems) => (input: unknown) => guarded("host first", original(input), hostFirst),
     rows: true,
   },
   {
@@ -175,7 +177,7 @@ const TWEAKS = [
     // Called as a function, the original's hooks run as this component's.
     wrap: (original: HostBadge) =>
       function HostBadge(props: { badge: { showLabel: boolean } }) {
-        return withoutServerIcon(original(props), props.badge.showLabel);
+        return guarded("host badge", original(props), (badge) => withoutServerIcon(badge, props.badge.showLabel));
       },
     rows: true,
   },
@@ -185,7 +187,7 @@ const TWEAKS = [
     name: "useNewWorkspaceForm",
     wrap: (original: UseNewWorkspaceForm) =>
       function useNewWorkspaceForm(input: unknown) {
-        return hostPickerFirst(original(input));
+        return guarded("host picker first", original(input), hostPickerFirst);
       },
     rows: false,
   },
@@ -196,7 +198,7 @@ const TWEAKS = [
     name: "projectCommandCenterRows",
     wrap: (original: ProjectCommandCenterRows) =>
       function projectCommandCenterRows(sections: PaletteSection[], sizes: unknown) {
-        return original(markAsDoneFirst(sections), sizes);
+        return original(guarded("Mark as done first", sections, markAsDoneFirst), sizes);
       },
     rows: false,
   },
@@ -208,7 +210,7 @@ const TWEAKS = [
     name: "publish",
     wrap: (original: ButtonStore["publish"]) =>
       function publish(this: ButtonStore, entries: ButtonEntry[]) {
-        return original.call(this, lowercaseRunPill(entries));
+        return original.call(this, guarded("run pill", entries, lowercaseRunPill));
       },
     rows: false,
     // Pills added before the plugin started are relabeled as it starts, and given back Paseo's as it stops.

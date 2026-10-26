@@ -696,6 +696,19 @@ runPill.update({ label: "Run" });
 buttons.setOpen(buttons.getSnapshot()[0].key, true);
 assert.deepEqual(pillLabels(), ["shell-yeah:run", "all:mcp (3)", "other:Run", "shell-yeah:run"]);
 assert.equal(buttons.getSnapshot()[0].open, true);
+// A pill the tweak cannot read, as after a Paseo update: the store takes it as Paseo made it, and the
+// tweak warns once instead of breaking every plugin's buttons.
+warnings.length = 0;
+console.warn = (...args) => warnings.push(args.join(" "));
+const odd = { key: -1, id: "odd", installation: installation("other"), placement: "composer", context: {}, button: null };
+buttons.publish([...buttons.getSnapshot(), odd]);
+buttons.publish([...buttons.getSnapshot()]);
+assert.equal(buttons.getSnapshot().at(-1), odd);
+buttons.publish(buttons.getSnapshot().filter((entry) => entry !== odd));
+console.warn = warn;
+assert.equal(warnings.length, 1);
+assert.match(warnings[0], /\[tweaks\] run pill failed/);
+assert.deepEqual(pillLabels(), ["shell-yeah:run", "all:mcp (3)", "other:Run", "shell-yeah:run"]);
 assert.equal(pendingModule.factory, pendingFactory, "all found, the modules not run yet as they were");
 for (const look of looks.splice(0)) look.callback();
 assert.equal(looks.length, 0, "all found, no more looking");

@@ -1,4 +1,5 @@
 import { readWaiting, subscribeWaiting } from "./agents";
+import { guarded } from "./guard";
 import { alwaysHidden, readDone, readHidden, subscribe } from "./hosts";
 import { splitIdle, type BuildShortcuts, type GroupingInput, type Projection } from "./idle";
 
@@ -177,8 +178,11 @@ export function patch({ projection, orderStore, buildShortcuts }: SidebarModules
     let timer: unknown;
     const layout = (input: ProjectionInput & GroupingInput) => {
       const now = Date.now();
-      const result = original(hideProjects(input, readHidden()));
-      const { projection: split, turnsDoneAt } = splitIdle(result, input, now, readDone(), readWaiting(), buildShortcuts);
+      const result = original(guarded("hiding workspaces", input, (shown) => hideProjects(shown, readHidden())));
+      const unchanged = { projection: result, turnsDoneAt: null };
+      const { projection: split, turnsDoneAt } = guarded("Idle and Waiting", unchanged, () =>
+        splitIdle(result, input, now, readDone(), readWaiting(), buildShortcuts),
+      );
       clearTimeout(timer);
       // A timer can fire a little early; the second's margin keeps it from finding the row still in Idle.
       timer = turnsDoneAt === null ? undefined : setTimeout(() => relayout(orderStore), turnsDoneAt - now + 1000);
