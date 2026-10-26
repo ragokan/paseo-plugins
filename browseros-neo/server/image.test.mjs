@@ -41,7 +41,7 @@ assert encode_image(at_limit, 95, True, png_limit=10) == (b'p' * 10, 'image/png'
 assert at_limit.calls == [('png', ['compression'], ['1'])]
 above = Encoder(11)
 assert encode_image(above, 73, True, png_limit=10) == (b'jpeg', 'image/jpeg')
-assert above.calls == [('png', ['compression'], ['1']), ('jpeg', ['quality'], ['73'])]
+assert above.calls == [('png', ['compression'], ['1']), ('jpeg', ['quality'], ['95'])]
 jpeg = Encoder(0)
 assert encode_image(jpeg, 70, False) == (b'jpeg', 'image/jpeg')
 assert jpeg.calls == [('jpeg', ['quality'], ['70'])]
@@ -76,6 +76,8 @@ d.windows = lambda: [window]
 d.attributes = lambda xid: SimpleNamespace(map_state=2)
 d.capture_window = lambda *args: image
 d.composite_popups = lambda *args: None
+clock = [1.0]
+time.monotonic = lambda: clock[0]
 request = dict(windowId=None, maxWidth=64, maxHeight=64, quality=70)
 first = d.frame(request)
 assert first['mimeType'] == 'image/jpeg' and first['image']
@@ -83,29 +85,101 @@ assert len(image.encodes) == 1
 same = d.frame(dict(request, since=first['hash']))
 assert len(image.encodes) == 1, image.encodes
 assert same['hash'] == first['hash'] and same['image'] is None and not same['changed']
+assert d.frame(dict(request, since=first['hash'], includeImage=True))['image'] == first['image']
+assert len(image.encodes) == 1, 'Repopulating Node cache must reuse encoded bytes'
 image.pixels = b'abcdefZZghijkl'
 assert d.frame(request)['hash'] == first['hash']
 assert len(image.encodes) == 1
 assert d.frame(request)['image'] == first['image'], 'A new viewer must receive the cached image'
 
-png = d.frame(dict(request, lossless=True, since=first['hash']))
-assert png['mimeType'] == 'image/png' and png['image'] and png['hash'] != first['hash']
+motion = d.frame(dict(request, lossless=True, since=first['hash']))
+assert motion['mimeType'] == 'image/jpeg' and motion['hash'].endswith('.j')
+clock[0] += 0.149
+assert d.frame(dict(request, lossless=True, since=motion['hash']))['image'] is None
 assert len(image.encodes) == 2
+clock[0] += 0.002
+png = d.frame(dict(request, lossless=True, since=motion['hash']))
+assert png['mimeType'] == 'image/png' and png['image'] and png['hash'] != first['hash']
+assert len(image.encodes) == 3
 same_png = d.frame(dict(request, lossless=True, since=png['hash']))
 assert same_png['image'] is None and same_png['mimeType'] == 'image/png'
-assert len(image.encodes) == 2
+assert png['hash'] == motion['hash'][:-1] + 'p'
+assert len(image.encodes) == 3
 window['minimized'] = True
 assert d.frame(dict(request, lossless=True))['image'] == png['image']
-assert len(image.encodes) == 2
-assert d.frame(dict(request, lossless=True, quality=95))['hash'] != png['hash']
 assert len(image.encodes) == 3
+minimized_motion = d.frame(dict(request, lossless=True, quality=95))
+assert minimized_motion['hash'] != png['hash']
+assert len(image.encodes) == 4
+clock[0] += 0.151
+minimized_refined = d.frame(dict(request, lossless=True, quality=95, since=minimized_motion['hash']))
+assert minimized_refined['mimeType'] == 'image/png' and minimized_refined['hash'].endswith('.p')
+assert len(image.encodes) == 5
+window['minimized'] = False
+image.pixels = b'AbcdefZZghijkl'
+changed = d.frame(dict(request, lossless=True, since=png['hash']))
+assert changed['hash'].endswith('.j') and changed['mimeType'] == 'image/jpeg'
+assert changed['hash'][:-2] != png['hash'][:-2]
+assert len(image.encodes) == 6
 
 d.last_frames.clear()
 d.last_images.clear()
+window['minimized'] = True
 empty = d.frame(dict(request, lossless=True))
 assert empty['image'] is None and empty['mimeType'] == 'image/jpeg'
 d.windows = lambda: []
 missing = d.frame(dict(request, lossless=True))
 assert missing['status'] == 'not-running' and missing['mimeType'] == 'image/jpeg'
+`);
+});
+
+test("tier identity and settle refinement use the latest pixels and never regress a refined tier", () => {
+  check(`
+assert encoding_tier('abc', True, None, 1.0, 3.0) == 'j'
+assert encoding_tier('abc', True, 'abc.j', 1.0, 1.149) == 'j'
+assert encoding_tier('abc', True, 'abc.j', 1.0, 1.151) == 'p'
+assert encoding_tier('abc', True, 'old.j', 1.0, 3.0) == 'j'
+assert encoding_tier('abc', False, 'abc.j', 1.0, 3.0) == 'j'
+assert encoding_tier('abc', True, 'abc.p', 1.0, 3.0, refined=True) == 'p'
+`);
+});
+
+test("XDamage is optional and its events track target and popup damage independently", () => {
+  check(`
+from types import SimpleNamespace
+# Missing library is a supported fallback, not an unsupported desktop.
+d = Desktop.__new__(Desktop)
+d.x, d.display, d.root = None, None, 1
+original = C.CDLL
+C.CDLL = lambda name: (_ for _ in ()).throw(OSError('missing'))
+d.init_damage()
+assert d.damage is None
+C.CDLL = original
+d.last_frames = {}
+assert d.changed(dict(windowId='0x10', maxWidth=800, maxHeight=600, quality=80)) == dict(supported=False, changed=True)
+
+monitor = DamageMonitor.__new__(DamageMonitor)
+monitor.display, monitor.event_type = None, 90
+monitor.watches, monitor.targets, monitor.dirty = {16: 1, 17: 2, 32: 3}, {16, 17}, set()
+events = [(90, 16)]
+def next_event(display, pointer):
+    kind, window = events.pop(0)
+    event = C.cast(pointer, C.POINTER(XEvent)).contents
+    event.client.type, event.client.window = kind, window
+monitor.x = SimpleNamespace(XPending=lambda display: len(events), XNextEvent=next_event, XFlush=lambda display: None)
+subtracted = []
+monitor.lib = SimpleNamespace(XDamageSubtract=lambda display, damage, *args: subtracted.append(damage))
+assert monitor.changed(16) and not monitor.changed(17)
+monitor.captured(16)
+assert not monitor.changed(16)
+assert subtracted == [1, 3], subtracted
+# Popups belong to the browser and can affect any viewer of its windows.
+events.append((90, 32))
+assert monitor.changed(16) and monitor.changed(17)
+monitor.captured(16)
+assert monitor.changed(17), 'Capturing one window must not consume another target damage'
+monitor.dirty.clear()
+events.append((18, 1))
+assert monitor.changed(16), 'Root unmap events must remove composited popups'
 `);
 });

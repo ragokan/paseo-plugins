@@ -1,14 +1,16 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Image, PixelRatio, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { PixelRatio, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import type { Frame, InputEvent } from "../shared/contracts.ts";
-import { bufferedFrame, frameImageUri, frameKey, sameFramePixels } from "./frame-buffer.ts";
+import { bufferedFrame, decodedFrame, frameKey, sameFramePixels } from "./frame-buffer.ts";
+import { FrameImage } from "./frame-image.tsx";
 import { fitSize, type OptionalText, type Size } from "./logic.ts";
 import { touchPoint, useNativeGestures } from "./native-gestures.ts";
 import { bindViewer, type ViewNode } from "./web.ts";
 
 interface Props {
   frame: Frame;
+  getLatestFrame(): Frame | null;
   box: Size;
   zoom: boolean;
   active: boolean;
@@ -19,7 +21,7 @@ interface Props {
   onInteract(): void;
 }
 
-export function Viewer({ frame, box, zoom, active, theme, onInput, onDisplay, onFocus, onInteract }: Props) {
+export function Viewer({ frame, getLatestFrame, box, zoom, active, theme, onInput, onDisplay, onFocus, onInteract }: Props) {
   const [slots, setSlots] = useState<[Frame | null, Frame | null]>([null, null]);
   const [front, setFront] = useState<0 | 1 | null>(null);
   const [loading, setLoading] = useState<0 | 1 | null>(null);
@@ -36,8 +38,8 @@ export function Viewer({ frame, box, zoom, active, theme, onInput, onDisplay, on
     ? Math.max(2, width / PixelRatio.get() / Math.max(1, fitted.width))
     : 1;
   const drawn = { width: fitted.width * scale, height: fitted.height * scale };
-  const callbacks = useRef({ onDisplay, onFocus, onInteract });
-  callbacks.current = { onDisplay, onFocus, onInteract };
+  const callbacks = useRef({ onDisplay, onFocus, onInteract, getLatestFrame });
+  callbacks.current = { onDisplay, onFocus, onInteract, getLatestFrame };
   const geometry = useRef(remote);
   const pending = useRef<Frame | null>(null);
   const decoded = useRef<[Frame | null, Frame | null]>([null, null]);
@@ -46,7 +48,8 @@ export function Viewer({ frame, box, zoom, active, theme, onInput, onDisplay, on
   const interact = useCallback(() => callbacks.current.onInteract(), []);
 
   useEffect(() => {
-    const next = bufferedFrame(frame, slots);
+    const latest = callbacks.current.getLatestFrame();
+    const next = latest && bufferedFrame(latest, slots);
     if (!next) return;
     if (shown && sameFramePixels(shown, next)) {
       if (front !== null && (next.windowWidth !== shown.windowWidth || next.windowHeight !== shown.windowHeight)) {
@@ -97,35 +100,37 @@ export function Viewer({ frame, box, zoom, active, theme, onInput, onDisplay, on
     drawn, remote, send, onInteract: interact,
   });
 
+  const loaded = useCallback((slot: Frame, index: number) => {
+    if (pending.current !== slot) return;
+    decoded.current[index] = slot;
+    pending.current = null;
+    setLoading(null);
+    const next = decodedFrame(callbacks.current.getLatestFrame(), slot);
+    if (!next) return;
+    if (next !== slot) setSlots((previous) => {
+      const updated: [Frame | null, Frame | null] = [...previous];
+      updated[index] = next;
+      return updated;
+    });
+    setFront(index as 0 | 1);
+    setFailed(null);
+    callbacks.current.onDisplay(next);
+  }, []);
+  const imageFailed = useCallback((slot: Frame) => {
+    if (pending.current !== slot) return;
+    pending.current = null;
+    if (sameFramePixels(callbacks.current.getLatestFrame(), slot)) setFailed(frameKey(slot));
+    setLoading(null);
+  }, []);
+
   function images() {
     return slots.map((slot, index) => slot?.image ? (
       <View
         key={`${index}:${frameKey(slot)}`}
         pointerEvents="none"
-        style={{ position: "absolute", left: 0, top: 0, width: drawn.width, height: drawn.height, zIndex: index === front ? 1 : 0 }}
+        style={{ position: "absolute", left: 0, top: 0, width: drawn.width, height: drawn.height, zIndex: index === front ? 1 : 0, opacity: front === null ? 0 : 1 }}
       >
-        <Image
-          source={{ uri: frameImageUri(slot.mimeType, slot.image) }}
-          fadeDuration={0}
-          resizeMode="stretch"
-          accessibilityLabel="Live BrowserOS window"
-          style={{ width: drawn.width, height: drawn.height }}
-          onLoad={() => {
-            if (index !== loading || pending.current !== slot) return;
-            decoded.current[index] = slot;
-            pending.current = null;
-            setFront(index as 0 | 1);
-            setLoading(null);
-            setFailed(null);
-            callbacks.current.onDisplay(slot);
-          }}
-          onError={() => {
-            if (index !== loading || pending.current !== slot) return;
-            pending.current = null;
-            setFailed(frameKey(slot));
-            setLoading(null);
-          }}
-        />
+        <FrameImage frame={slot} index={index} width={drawn.width} height={drawn.height} onLoad={loaded} onError={imageFailed} />
       </View>
     ) : null);
   }

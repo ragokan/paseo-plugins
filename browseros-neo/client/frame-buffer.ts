@@ -15,8 +15,15 @@ export function frameImageUri(mimeType: Frame["mimeType"], image: string): strin
 /** Metadata can change while the JPEG stays identical, including after a fit. */
 export function bufferedFrame(frame: Frame, cached: readonly (Frame | null)[]): Frame | null {
   if (frame.status !== "ready" || !frame.hash) return null;
-  const image = frame.image ?? cached.find((item) => sameFramePixels(item, frame))?.image;
+  if (frame.image) return frame;
+  const image = cached.find((item) => sameFramePixels(item, frame))?.image;
   return image ? { ...frame, image } : null;
+}
+
+/** Finish this decode; the next decode uses the latest frame, skipping intermediates. */
+export function decodedFrame(latest: Frame | null, completed: Frame): Frame | null {
+  if (latest?.status !== "ready" || latest.windowId !== completed.windowId) return null;
+  return sameFramePixels(completed, latest) ? bufferedFrame(latest, [completed]) : completed;
 }
 
 export function retainFrameImage(previous: Frame | null, next: Frame): Frame {

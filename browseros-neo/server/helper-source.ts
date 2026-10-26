@@ -43,6 +43,7 @@ def fit_size(width, height, max_width, max_height):
 
 
 PNG_LIMIT = 1572864
+SETTLE_SECONDS = 0.150
 
 
 def pixel_hash(image, quality, lossless):
@@ -62,9 +63,9 @@ def pixel_hash(image, quality, lossless):
     return digest.hexdigest()
 
 
-def frame_response(result, saved, since):
-    result.update(saved)
-    if saved['hash'] == since:
+def frame_response(result, saved, since, include_image=False):
+    result.update({k: v for k, v in saved.items() if k not in ('pixels', 'changedAt')})
+    if saved['hash'] == since and not include_image:
         result.update(changed=False, image=None)
     return result
 
@@ -76,10 +77,91 @@ def encode_image(image, quality, lossless, png_limit=PNG_LIMIT):
             raise RuntimeError('The BrowserOS window could not be encoded as PNG.')
         if len(encoded) <= png_limit:
             return encoded, 'image/png'
-    ok, encoded = image.save_to_bufferv('jpeg', ['quality'], [str(quality)])
+    ok, encoded = image.save_to_bufferv('jpeg', ['quality'], [str(95 if lossless else quality)])
     if not ok:
         raise RuntimeError('The BrowserOS window could not be encoded as JPEG.')
     return encoded, 'image/jpeg'
+
+
+def encoding_tier(pixel_id, lossless, since, changed_at, now, refined=False):
+    # Once refined, newcomers share that tier too. New pixels always start as JPEG.
+    if lossless and (refined or (since == pixel_id + '.j' and now - changed_at >= SETTLE_SECONDS)):
+        return 'p'
+    return 'j'
+
+
+class DamageMonitor:
+    def __init__(self, x, display, root):
+        self.x, self.display = x, display
+        self.lib = C.CDLL('libXdamage.so.1')
+        Desktop.bind(self.lib, 'XDamageQueryExtension', C.c_int,
+                     [C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_int)])
+        Desktop.bind(self.lib, 'XDamageCreate', C.c_ulong, [C.c_void_p, C.c_ulong, C.c_int])
+        Desktop.bind(self.lib, 'XDamageSubtract', None, [C.c_void_p, C.c_ulong, C.c_ulong, C.c_ulong])
+        Desktop.bind(self.lib, 'XDamageDestroy', None, [C.c_void_p, C.c_ulong])
+        event, error = C.c_int(), C.c_int()
+        if not self.lib.XDamageQueryExtension(display, C.byref(event), C.byref(error)):
+            raise RuntimeError('XDamage is unavailable')
+        self.event_type = event.value
+        self.watches, self.targets, self.dirty = {}, set(), set()
+        for name, result, arguments in [
+            ('XPending', C.c_int, [C.c_void_p]),
+            ('XNextEvent', C.c_int, [C.c_void_p, C.POINTER(XEvent)]),
+            ('XSelectInput', C.c_int, [C.c_void_p, C.c_ulong, C.c_long]),
+        ]:
+            Desktop.bind(x, name, result, arguments)
+        # This X connection is separate from GDK's; structure events include popup
+        # map/unmap/configure even before a new popup has its own damage object.
+        x.XSelectInput(display, root, 1 << 19)
+        x.XFlush(display)
+
+    def watch(self, window, target=False):
+        if target:
+            self.targets.add(window)
+        if window not in self.watches:
+            self.watches[window] = self.lib.XDamageCreate(self.display, window, 3)
+            self.dirty.update(self.targets)
+            self.x.XFlush(self.display)
+
+    def retain_targets(self, windows, exists):
+        # Client windows can be reparented, so their destruction need not be a
+        # root SubstructureNotify. Reconcile watches with managed windows too.
+        for window in self.targets - windows:
+            damage = self.watches.pop(window, None)
+            if damage and exists(window):
+                self.lib.XDamageDestroy(self.display, damage)
+            self.dirty.discard(window)
+        self.targets.intersection_update(windows)
+
+    def drain(self):
+        for _ in range(2048):
+            if not self.x.XPending(self.display):
+                break
+            event = XEvent()
+            self.x.XNextEvent(self.display, C.byref(event))
+            kind = event.client.type
+            if kind == self.event_type:
+                window = event.client.window  # XDamageNotifyEvent.drawable: XAnyEvent.window offset.
+                self.dirty.update({window} if window in self.targets else self.targets)
+            elif kind in (16, 17, 18, 19, 21, 22, 24, 26):
+                self.dirty.update(self.targets)
+                if kind == 17:  # The server already destroyed damage objects for this window.
+                    window = event.pad[5]  # XDestroyWindowEvent.window, after .event.
+                    self.watches.pop(window, None)
+                    self.targets.discard(window)
+                    self.dirty.discard(window)
+
+    def changed(self, window):
+        self.drain()
+        return window not in self.targets or window in self.dirty
+
+    def captured(self, window):
+        self.drain()
+        for xid, damage in self.watches.items():
+            if xid == window or xid not in self.targets:
+                self.lib.XDamageSubtract(self.display, damage, 0, 0)
+        self.dirty.discard(window)
+        self.x.XFlush(self.display)
 
 
 class Attributes(C.Structure):
@@ -176,6 +258,26 @@ class Desktop:
         self.foreign_windows = {}
         self.held_keys = set()
         self.held_buttons = set()
+        self.init_damage()
+
+    def init_damage(self):
+        try:
+            self.damage = DamageMonitor(self.x, self.display, self.root)
+        except Exception:
+            # Capture/input still work on X servers without this optional extension.
+            self.damage = None
+
+    def changed(self, request):
+        damage = getattr(self, 'damage', None)
+        window = int(request.get('windowId') or '0', 16)
+        physical = damage.changed(window) if damage else True
+        key = (request.get('windowId'), request['maxWidth'], request['maxHeight'],
+               request['quality'], request.get('lossless', False))
+        saved = self.last_frames.get(key)
+        refine = bool(saved and request.get('lossless') and
+            request.get('since') == saved['pixels'] + '.j' and
+            time.monotonic() - saved['changedAt'] >= SETTLE_SECONDS)
+        return dict(supported=damage is not None, changed=physical or refine)
 
     @staticmethod
     def bind(lib, name, result, arguments):
@@ -340,6 +442,8 @@ class Desktop:
             right, bottom = min(width, dx + attrs.width), min(height, dy + attrs.height)
             if right <= left or bottom <= top:
                 continue
+            if getattr(self, 'damage', None):
+                self.damage.watch(popup)
             overlay = self.capture_window(popup, attrs.width, attrs.height)
             if overlay:
                 right = min(right, dx + overlay.get_width())
@@ -353,6 +457,9 @@ class Desktop:
         self.pump_events()
         self.foreign_windows = {xid: native for xid, native in self.foreign_windows.items() if not native.is_destroyed()}
         windows = self.windows()
+        if getattr(self, 'damage', None):
+            self.damage.retain_targets({int(w['id'], 16) for w in windows},
+                                       lambda xid: self.attributes(xid) is not None)
         result = dict(status='ready' if windows else 'not-running',
             reason=None if windows else 'No BrowserOS window is open.', windows=windows,
             windowId=None, windowWidth=0, windowHeight=0, hash=None, changed=False,
@@ -369,14 +476,21 @@ class Desktop:
         result.update(windowId=target['id'], windowWidth=target['width'], windowHeight=target['height'])
         lossless = request.get('lossless', False)
         key = (target['id'], request['maxWidth'], request['maxHeight'], request['quality'], lossless)
+        if getattr(self, 'damage', None):
+            self.damage.watch(window, target=True)
         attrs = self.attributes(window)
         image = None
         if attrs and attrs.map_state == 2 and not target['minimized']:
             image = self.capture_window(window, target['width'], target['height'])
         if image is None:
+            if getattr(self, 'damage', None):
+                # Minimized windows retain their last image; consume the unmap
+                # notification so an idle long poll does not capture repeatedly.
+                self.damage.captured(window)
             cached = self.last_frames.get(key)
-            if cached:
-                return frame_response(result, cached, request.get('since'))
+            if cached and encoding_tier(cached['pixels'], lossless, request.get('since'),
+                    cached['changedAt'], time.monotonic(), cached['hash'].endswith('.p')) == cached['hash'][-1]:
+                return frame_response(result, cached, request.get('since'), request.get('includeImage', False))
             image = self.last_images.get(target['id'])
             if image is None:
                 return result
@@ -388,21 +502,29 @@ class Desktop:
             if len(self.last_images) >= 24 and target['id'] not in self.last_images:
                 self.last_images.pop(next(iter(self.last_images)))
             self.last_images[target['id']] = image
+            if getattr(self, 'damage', None):
+                self.damage.captured(window)
         width, height = fit_size(image.get_width(), image.get_height(), request['maxWidth'], request['maxHeight'])
         if width != image.get_width() or height != image.get_height():
             image = image.scale_simple(width, height, self.Pixbuf.InterpType.BILINEAR)
-        frame_hash = pixel_hash(image, request['quality'], lossless)
+        pixels = pixel_hash(image, request['quality'], lossless)
         cached = self.last_frames.get(key)
+        now = time.monotonic()
+        same_pixels = cached and cached['pixels'] == pixels
+        changed_at = cached['changedAt'] if same_pixels else now
+        tier = encoding_tier(pixels, lossless, request.get('since'), changed_at, now,
+                             refined=bool(same_pixels and cached['hash'].endswith('.p')))
+        frame_hash = pixels + '.' + tier
         if cached and cached['hash'] == frame_hash:
-            return frame_response(result, cached, request.get('since'))
-        encoded, mime_type = encode_image(image, request['quality'], lossless)
+            return frame_response(result, cached, request.get('since'), request.get('includeImage', False))
+        encoded, mime_type = encode_image(image, request['quality'], tier == 'p')
         saved = dict(hash=frame_hash, changed=True,
                      image=base64.b64encode(encoded).decode('ascii'), mimeType=mime_type,
-                     imageWidth=width, imageHeight=height)
+                     imageWidth=width, imageHeight=height, pixels=pixels, changedAt=changed_at)
         if len(self.last_frames) >= 24 and key not in self.last_frames:
             self.last_frames.pop(next(iter(self.last_frames)))
         self.last_frames[key] = saved
-        return frame_response(result, saved, request.get('since'))
+        return frame_response(result, saved, request.get('since'), request.get('includeImage', False))
 
     def activate(self, window):
         attrs = self.attributes(window)
@@ -609,6 +731,8 @@ def main():
                     result = dict(ok=False, error=unsupported)
             elif request['method'] == 'frame':
                 result = desktop.frame(request['params'])
+            elif request['method'] == 'changed':
+                result = desktop.changed(request['params'])
             elif request['method'] == 'input':
                 result = desktop.input(request['params'])
             elif request['method'] == 'display':

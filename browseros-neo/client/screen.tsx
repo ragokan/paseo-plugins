@@ -19,6 +19,7 @@ import { watchShown, type ViewNode } from "./web.ts";
 type ReadContract = typeof readFrame;
 type FitContract = typeof fitDisplay;
 type InputContract = typeof sendInput;
+type DisplayedWindow = Pick<Frame, "windowId" | "windowWidth" | "windowHeight">;
 
 export function BrowserScreen(props: PluginScreenProps) {
   return <BrowserScreenBody key={props.host.id} {...props} />;
@@ -40,7 +41,7 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
   const [zoom, setZoom] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [shown, setShown] = useState<Frame | null>(null);
+  const [shown, setShown] = useState<DisplayedWindow | null>(null);
   const [inputError, setInputError] = useState<OptionalText>(null);
   const [launchError, setLaunchError] = useState<OptionalText>(null);
   const [launching, setLaunching] = useState(false);
@@ -64,7 +65,7 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
     if (!connectionActive(permission.current) && !isReleaseInput(request.events)) return Promise.resolve({ ok: true, error: null });
     return input(request);
   }, [input]);
-  const { interact, pause: pauseFit } = useDisplayFit(fitConnected, active, box, qualityMode);
+  const { interact, pause: pauseFit } = useDisplayFit(fitConnected, active, box);
   const native = Platform.OS !== "web";
   const touchControls = native || layout.compact;
   const padding = layout.compact ? 8 : 12;
@@ -86,7 +87,7 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
     qualityMode, compact: layout.compact, native, zoom, box, pixelRatio: PixelRatio.get(),
     shown: shown ? { width: shown.windowWidth, height: shown.windowHeight } : null,
   });
-  const { frame, error, didDisplay, clear: clearFrames } = useFrames({
+  const { frame, error, getLatestFrame, clear: clearFrames } = useFrames({
     active: active && box.width > 0 && box.height > 0,
     read: readConnected, windowId: selected,
     ...settings,
@@ -117,9 +118,9 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
   }, [shown?.windowId, enqueue, interact]);
   const displayed = useCallback((next: Frame) => {
     if (!permission.current.connected) return;
-    setShown(next);
-    didDisplay(next);
-  }, [didDisplay]);
+    setShown((previous) => previous?.windowId === next.windowId && previous.windowWidth === next.windowWidth && previous.windowHeight === next.windowHeight
+      ? previous : { windowId: next.windowId, windowWidth: next.windowWidth, windowHeight: next.windowHeight });
+  }, []);
 
   function connect() {
     rememberConnection(host.id, true);
@@ -187,7 +188,7 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
           <Control
             theme={theme} label={layout.compact ? "Quality" : "Quality Mode"} compact={layout.compact}
             role="switch" selected={qualityMode} disabled={!ready}
-            accessibilityLabel="Quality Mode" accessibilityHint="Full HD image, more bitrate."
+            accessibilityLabel="Quality Mode" accessibilityHint="Sharper image with more bitrate. Refines to lossless when still."
             onPress={() => {
               const next = !qualityMode;
               rememberQuality(host.id, next);
@@ -237,7 +238,7 @@ function BrowserScreenBody({ theme, host, layout }: PluginScreenProps) {
           </View>
         ) : ready ? (
           <Viewer
-            frame={frame} box={box} zoom={zoom} active={active} theme={theme}
+            frame={frame} getLatestFrame={getLatestFrame} box={box} zoom={zoom} active={active} theme={theme}
             onInput={enqueue} onDisplay={displayed} onFocus={setFocused} onInteract={interact}
           />
         ) : (

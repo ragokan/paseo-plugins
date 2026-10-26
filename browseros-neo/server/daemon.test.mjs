@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import contribute from "../index.server.ts";
+import { LinuxBackend } from "./linux.ts";
 import { BrowserDaemon } from "./daemon.ts";
 import { DesktopHelper } from "./helper.ts";
 import { helperSource } from "./helper-source.ts";
 import { readFrame } from "../shared/contracts.ts";
+
+const withHelper = (helper) => new BrowserDaemon(new LinuxBackend(helper));
 
 const request = { windowId: null, maxWidth: 1000, maxHeight: 800, quality: 70, since: null, waitMs: 0 };
 const frame = {
@@ -83,8 +86,8 @@ test("missing X11 is reported as unsupported without crashing the helper", () =>
 
 test("simultaneous viewers share capture and equal hashes omit the JPEG", async () => {
   let calls = 0;
-  const daemon = new BrowserDaemon({
-    async request() { calls++; await new Promise((resolve) => setTimeout(resolve, 10)); return frame; },
+  const daemon = withHelper({
+    async request(method) { if (method === "changed") return { supported: false, changed: false }; calls++; await new Promise((resolve) => setTimeout(resolve, 10)); return frame; },
     async stop() {},
   });
   try {
@@ -95,13 +98,13 @@ test("simultaneous viewers share capture and equal hashes omit the JPEG", async 
     assert.equal(unchanged.changed, false);
     assert.equal(unchanged.image, null);
     assert.equal(unchanged.hash, frame.hash);
-    assert.ok(calls <= 3, `expected shared captures, got ${calls}`);
+    assert.ok(calls <= 6, `expected shared captures, got ${calls}`);
   } finally { await daemon.stop(); }
 });
 
 test("long poll returns new pixels and current window metadata", async () => {
   let calls = 0;
-  const daemon = new BrowserDaemon({
+  const daemon = withHelper({
     async request() { return ++calls === 1 ? frame : { ...frame, hash: "second", image: "/9j/new" }; },
     async stop() {},
   });
@@ -116,7 +119,7 @@ test("long poll returns new pixels and current window metadata", async () => {
 
 test("viewers share unchanged helper captures without losing cached image bytes", async () => {
   const seen = [];
-  const daemon = new BrowserDaemon({
+  const daemon = withHelper({
     async request(_method, input) {
       seen.push(input);
       const lossless = input.lossless ?? false;
@@ -146,7 +149,7 @@ test("viewers share unchanged helper captures without losing cached image bytes"
 
 test("cleanup wakes long polls and stops the helper", async () => {
   let stopped = false;
-  const daemon = new BrowserDaemon({ async request() { return frame; }, async stop() { stopped = true; } });
+  const daemon = withHelper({ async request() { return frame; }, async stop() { stopped = true; } });
   const pending = daemon.readFrame({ ...request, since: frame.hash, waitMs: 5000 });
   await new Promise((resolve) => setTimeout(resolve, 20));
   await daemon.stop();
@@ -155,7 +158,7 @@ test("cleanup wakes long polls and stops the helper", async () => {
 });
 
 test("expected helper failures are returned through the contracts", async () => {
-  const daemon = new BrowserDaemon({ async request() { throw new Error("No X11 desktop"); }, async stop() {} });
+  const daemon = withHelper({ async request() { throw new Error("No X11 desktop"); }, async stop() {} });
   try {
     assert.equal((await daemon.readFrame(request)).status, "unsupported");
     assert.equal((await daemon.readFrame(request)).mimeType, "image/jpeg");

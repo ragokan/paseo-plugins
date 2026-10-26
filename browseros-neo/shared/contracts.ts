@@ -5,13 +5,15 @@ import { z } from "zod";
  * The app and the daemon agree on these and nothing else. Both sides validate
  * every call against them, so this module stays free of Node and React Native.
  *
- * Coordinates are the BrowserOS window's own X11 pixels, (0, 0) at its top-left
- * corner, whatever size the app draws the frame at. The app scales a touch or a
- * click back to window pixels before it sends it.
+ * Coordinates are the BrowserOS window's own units, (0, 0) at its top-left
+ * corner, whatever size the app draws the frame at: X11 pixels on Linux, points
+ * on macOS. The app scales a touch or a click back to window units before it
+ * sends it. On a Retina Mac a frame can have more pixels than the window has
+ * points.
  */
 
 export const WindowSchema = z.object({
-  /** The X11 window id, as hex: "0x4000003". */
+  /** The window id, as hex: the X11 window on Linux, the CGWindowID on macOS. */
   id: z.string().regex(/^0x[0-9a-f]+$/),
   /** The window's title without BrowserOS's " - BrowserOS neo" suffix. */
   title: z.string(),
@@ -34,22 +36,23 @@ export const readFrame = defineRpc({
   input: z.object({
     /**
      * Null for the default window: the largest one that is not minimized, the
-     * oldest of equal ones (the lowest X11 id). Focus does not decide it, since
+     * oldest of equal ones (the lowest window id). Focus does not decide it, since
      * agents and popups move focus.
      */
     windowId: z.string().regex(/^0x[0-9a-f]+$/).nullable(),
     /** The largest image the app can use, in image pixels. Never scaled up. */
     maxWidth: z.number().int().min(64).max(8192),
     maxHeight: z.number().int().min(64).max(8192),
-    /** JPEG quality. */
+    /** JPEG quality for frames sent while the picture is changing. */
     quality: z.number().int().min(20).max(95),
     /**
-     * Quality Mode: send lossless PNG, which keeps text sharp. A frame whose PNG
-     * would exceed 1.5 MB (video, large photos) is sent as JPEG at `quality`
-     * instead. Older apps omit it and get JPEG.
+     * Refine when still: once the picture has stopped changing for a moment, the
+     * daemon sends the same pixels again as lossless PNG (a new frame id), so
+     * moving content stays fast and still text is exact. A PNG over 1.5 MB is
+     * sent as JPEG at quality 95 instead. Older apps omit it and get JPEG only.
      */
     lossless: z.boolean().default(false),
-    /** The hash of the frame the app already shows; an equal frame is not sent again. */
+    /** The id of the last frame the app received; that frame is not sent again. */
     since: z.string().nullable(),
     /** Long poll: hold the call up to this long while the frame equals `since`. */
     waitMs: z.number().int().min(0).max(5000),
@@ -62,10 +65,13 @@ export const readFrame = defineRpc({
     windows: z.array(WindowSchema),
     /** The window this frame shows; null without one. */
     windowId: z.string().nullable(),
-    /** The window's size in X11 pixels, which input coordinates use. */
+    /** The window's size in window units (see above), which input coordinates use. */
     windowWidth: z.number().int(),
     windowHeight: z.number().int(),
-    /** Identifies the frame's pixels. Equal to `since` when nothing changed. */
+    /**
+     * Identifies the frame: its pixels and how they are encoded, so a lossless
+     * refinement of the same pixels has a new id. Equal to `since` when nothing changed.
+     */
     hash: z.string().nullable(),
     /** False when the frame still equals `since`; then `image` is null. */
     changed: z.boolean(),
@@ -122,11 +128,13 @@ export const sendInput = defineRpc({
  * Sizes the desktop so a maximized BrowserOS window matches the viewer: the
  * app sends the area it draws the window in, in its own logical pixels (CSS
  * pixels on the web and desktop apps, points on iOS, dp on Android). The daemon
- * scales that up to at least 800x600, keeping its shape, and grows or shrinks
- * the X11 virtual screen around it. The last call wins; it returns to the
- * original resolution once no app has read a frame for a minute, and when the
- * plugin stops. Only virtual displays (such as Xorg's dummy driver) are
- * resized; a real monitor is left alone and `ok` is false.
+ * scales that up to at least 800x600, keeping its shape. On Linux it grows or
+ * shrinks the X11 virtual screen around a maximized BrowserOS; only virtual
+ * displays (such as Xorg's dummy driver) are resized, and a real monitor is
+ * left alone with `ok` false. On macOS it resizes the BrowserOS window itself,
+ * within the screen's visible area. The last call wins; everything returns to
+ * how it was once no app has read a frame for a minute, and when the plugin
+ * stops.
  */
 export const fitDisplay = defineRpc({
   name: "display.fit",
@@ -136,7 +144,7 @@ export const fitDisplay = defineRpc({
   }),
   output: z.object({
     ok: z.boolean(),
-    /** The size a maximized BrowserOS window gets, in X11 pixels; 0 when not resized. */
+    /** The size BrowserOS's window gets, in window units; 0 when not resized. */
     width: z.number().int(),
     height: z.number().int(),
     error: z.string().nullable(),

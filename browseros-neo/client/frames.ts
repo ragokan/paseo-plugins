@@ -17,10 +17,7 @@ interface Options {
   refresh: number;
 }
 
-interface ShownFrame { windowId: string | null; hash: string | null; mimeType: Frame["mimeType"] | null }
 interface FrameLoopOptions extends Omit<Options, "active" | "refresh"> {
-  getShown(): ShownFrame;
-  forgetShown(): void;
   onFrame(frame: Frame): void;
   onError(error: string | null): void;
 }
@@ -31,7 +28,15 @@ export function startFrameLoop(options: FrameLoopOptions): () => void {
   let timer: Timer | undefined;
   let wake: (() => void) | undefined;
   let failures = 0;
-  let received: Frame | null = null;
+  let since: string | null = null;
+  const bytesPerMs = (options.lossless ? 5 : 3) * 1024 * 1024 / 1000;
+  const capacity = bytesPerMs * 500;
+  let tokens = capacity;
+  let refilledAt = Date.now();
+  function refill(now: number) {
+    tokens = Math.min(capacity, tokens + Math.max(0, now - refilledAt) * bytesPerMs);
+    refilledAt = now;
+  }
   const pause = (milliseconds: number) => new Promise((resolve) => {
     wake = () => resolve(undefined);
     timer = setTimeout(wake, milliseconds);
@@ -39,12 +44,9 @@ export function startFrameLoop(options: FrameLoopOptions): () => void {
 
   async function run() {
     while (!stopped) {
-      let delay = 30;
+      const startedAt = Date.now();
+      let delay = 0;
       try {
-        const shown = options.getShown();
-        const since = received && shown.hash === received.hash && shown.windowId === received.windowId &&
-          shown.mimeType === received.mimeType && (shown.windowId === options.windowId || options.windowId === null)
-          ? shown.hash : null;
         const result = await options.read({
           windowId: options.windowId, maxWidth: options.maxWidth, maxHeight: options.maxHeight,
           quality: options.quality, lossless: options.lossless,
@@ -52,10 +54,10 @@ export function startFrameLoop(options: FrameLoopOptions): () => void {
           waitMs: since === null ? 0 : 1500,
         });
         if (stopped) break;
-        received = result;
-        if (result.status !== "ready" || (result.windowId !== options.getShown().windowId && !result.image)) {
-          options.forgetShown();
-        }
+        refill(Date.now());
+        // Base64 is ASCII: its character count approximates bytes on the wire.
+        tokens -= (result.image?.length ?? 0) + 1024;
+        since = result.status === "ready" ? result.hash : null;
         options.onFrame(result);
         options.onError(null);
         failures = 0;
@@ -65,7 +67,10 @@ export function startFrameLoop(options: FrameLoopOptions): () => void {
         options.onError(cause instanceof Error ? cause.message : String(cause));
         delay = Math.min(5000, 1000 * 2 ** failures++);
       }
-      if (!stopped) await pause(delay);
+      const now = Date.now();
+      refill(now);
+      delay = Math.ceil(Math.max(delay, 1000 / 30 - (now - startedAt), -tokens / bytesPerMs));
+      if (!stopped && delay > 0) await pause(delay);
     }
   }
   void run();
@@ -79,16 +84,17 @@ export function startFrameLoop(options: FrameLoopOptions): () => void {
 export function useFrames({ active, read, windowId, maxWidth, maxHeight, quality, lossless, refresh }: Options) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const [error, setError] = useState<OptionalText>(null);
-  const shown = useRef<ShownFrame>({ windowId: null, hash: null, mimeType: null });
+  const latest = useRef<Frame | null>(null);
   const running = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!active) return;
     const stop = startFrameLoop({
       read, windowId, maxWidth, maxHeight, quality, lossless,
-      getShown: () => shown.current,
-      forgetShown: () => { shown.current = { windowId: null, hash: null, mimeType: null }; },
-      onFrame: (result) => setFrame((previous) => retainFrameImage(previous, result)),
+      onFrame: (result) => {
+        latest.current = retainFrameImage(latest.current, result);
+        setFrame(latest.current);
+      },
       onError: setError,
     });
     running.current = stop;
@@ -98,15 +104,13 @@ export function useFrames({ active, read, windowId, maxWidth, maxHeight, quality
     };
   }, [active, read, windowId, maxWidth, maxHeight, quality, lossless, refresh]);
 
-  const didDisplay = useCallback((frame: Frame) => {
-    shown.current = { windowId: frame.windowId, hash: frame.hash, mimeType: frame.mimeType };
-  }, []);
+  const getLatestFrame = useCallback(() => latest.current, []);
   const clear = useCallback(() => {
     running.current?.();
     running.current = null;
-    shown.current = { windowId: null, hash: null, mimeType: null };
+    latest.current = null;
     setFrame(null);
     setError(null);
   }, []);
-  return { frame, error, didDisplay, clear };
+  return { frame, error, getLatestFrame, clear };
 }

@@ -22,14 +22,26 @@ print(json.dumps([image.get_width(), image.get_height()]))
   return JSON.parse(result.stdout);
 }
 
-test("live Quality Mode RPC returns a PNG covering the full BrowserOS window", async () => {
+test("live Quality Mode uses JPEG during motion and PNG when BrowserOS settles", async (t) => {
   const handlers = new Map();
   const cleanup = contribute({ handle(contract, handler) { handlers.set(contract.name, handler); } });
   try {
-    const frame = readFrame.output.parse(await handlers.get("frame.read")({
+    let frame = readFrame.output.parse(await handlers.get("frame.read")({
       windowId: null, maxWidth: 8192, maxHeight: 8192, quality: 95, lossless: true, since: null, waitMs: 0,
     }));
     assert.equal(frame.status, "ready", frame.reason);
+    assert.equal(frame.mimeType, "image/jpeg", "moving/first frames use JPEG");
+    for (let attempt = 0; attempt < 8 && frame.mimeType !== "image/png"; attempt++) {
+      frame = readFrame.output.parse(await handlers.get("frame.read")({
+        windowId: frame.windowId, maxWidth: 8192, maxHeight: 8192, quality: 95,
+        lossless: true, since: frame.hash, waitMs: 500,
+      }));
+    }
+    if (frame.mimeType !== "image/png") {
+      t.diagnostic("The live page kept changing or exceeded the PNG cap; JPEG is expected. Static PNG is checked by the deterministic RPC fixture.");
+      assert.ok(frame.hash.endsWith(".j") || frame.hash.endsWith(".p"));
+      return;
+    }
     assert.equal(frame.mimeType, "image/png");
     assert.match(frame.image, /^iVBORw0KGgo/);
     assert.ok(Buffer.from(frame.image, "base64").length <= 1_572_864);
@@ -73,6 +85,8 @@ original_encode = namespace['encode_image']
 encoded = set()
 def once(image, quality, lossless, *args, **kwargs):
     key = (image.get_width(), image.get_height(), quality, lossless)
+    if not lossless:
+        return original_encode(image, quality, lossless, *args, **kwargs)
     if key in encoded:
         raise RuntimeError('Unchanged pixels were encoded more than once')
     encoded.add(key)
@@ -87,7 +101,9 @@ namespace['main']()
   try {
     const input = { windowId: "0xf000", maxWidth: 8192, maxHeight: 8192, quality: 95, lossless: true, since: null, waitMs: 0 };
     const read = async (value) => readFrame.output.parse(await handlers.get("frame.read")(value));
-    const first = await read(input);
+    const motion = await read(input);
+    assert.equal(motion.mimeType, "image/jpeg");
+    const first = await read({ ...input, since: motion.hash, waitMs: 500 });
     assert.equal(first.status, "ready", first.reason);
     assert.equal(first.mimeType, "image/png");
     assert.match(first.image, /^iVBORw0KGgo/);
@@ -105,7 +121,9 @@ namespace['main']()
     const newcomer = await read(input);
     assert.equal(newcomer.changed, true);
     assert.equal(newcomer.image, first.image);
-    const fallback = await read({ ...input, windowId: "0xf001" });
+    const fallbackMotion = await read({ ...input, windowId: "0xf001" });
+    const fallback = await read({ ...input, windowId: "0xf001", since: fallbackMotion.hash, waitMs: 500 });
+    assert.ok(fallback.hash.endsWith(".p"));
     assert.equal(fallback.status, "ready", fallback.reason);
     assert.equal(fallback.mimeType, "image/jpeg");
     assert.match(fallback.image, /^\/9j\//);

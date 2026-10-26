@@ -7,35 +7,27 @@ const box = { width: 390.4, height: 844.2 };
 test("display fitting rounds logical pixels and respects contract bounds", () => {
   assert.deepEqual(displaySize(box), { width: 390, height: 844 });
   assert.deepEqual(displaySize({ width: 50, height: 9000 }), { width: 100, height: 8192 });
-  assert.deepEqual(displaySize(box, true), { width: 1920, height: 1080 });
-  assert.equal(displaySize({ width: 0, height: 0 }, true), null);
   for (const invalid of [{ width: 0, height: 500 }, { width: 500, height: -1 }, { width: NaN, height: Infinity }]) {
     assert.equal(displaySize(invalid), null);
   }
 });
 
-test("mode changes fit immediately, full HD stays fixed across box changes, and input reclaims it", (t) => {
+test("repeated box updates do not fit again or postpone a pending resize", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   const sent = [];
   const fitter = createDisplayFitter(async (size) => { sent.push(size); return { ok: true }; });
   t.after(fitter.pause);
   fitter.update(true, box);
-  fitter.update(true, { width: 800, height: 600 });
-  fitter.update(true, box, true);
-  assert.deepEqual(sent.at(-1), { width: 1920, height: 1080 });
-  fitter.update(true, { width: 844, height: 390 }, true);
-  t.mock.timers.tick(3000);
-  assert.equal(sent.length, 2);
-  fitter.interact();
-  assert.deepEqual(sent.at(-1), { width: 1920, height: 1080 });
-  fitter.update(true, { width: 844, height: 390 }, false);
+  fitter.update(true, box);
+  assert.deepEqual(sent, [{ width: 390, height: 844 }]);
+  const rotated = { width: 844, height: 390 };
+  fitter.update(true, rotated);
+  t.mock.timers.tick(499);
+  fitter.update(true, rotated);
+  assert.equal(sent.length, 1);
+  t.mock.timers.tick(1);
   assert.deepEqual(sent.at(-1), { width: 844, height: 390 });
-  assert.equal(sent.length, 4);
-  fitter.update(false, box, true);
-  t.mock.timers.tick(1000);
-  assert.equal(sent.length, 4);
-  fitter.update(true, box, true);
-  assert.deepEqual(sent.at(-1), { width: 1920, height: 1080 });
+  assert.equal(sent.length, 2);
 });
 
 test("a visible measured screen fits immediately, resuming takes ownership again", (t) => {

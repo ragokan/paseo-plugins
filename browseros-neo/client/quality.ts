@@ -28,17 +28,14 @@ interface Options {
 export function frameSettings({ qualityMode, compact, native, zoom, box, pixelRatio, shown }: Options) {
   let width = box.width * pixelRatio;
   let height = box.height * pixelRatio;
-  if (qualityMode) {
-    width = shown?.width || 1920;
-    height = shown?.height || 1080;
-  } else if (zoom) {
+  if (zoom) {
     width = shown?.width || width;
     height = shown?.height || height;
   }
   return {
     maxWidth: captureDimension(width),
     maxHeight: captureDimension(height),
-    quality: qualityMode ? 95 : compact || native ? 55 : 70,
+    quality: qualityMode ? 92 : compact || native ? 72 : 80,
     lossless: qualityMode,
   };
 }

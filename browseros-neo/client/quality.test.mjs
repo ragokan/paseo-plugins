@@ -8,25 +8,29 @@ const options = {
 };
 
 test("normal mode keeps device-pixel capture sizing and platform JPEG quality", () => {
-  assert.deepEqual(frameSettings(options), { maxWidth: 1170, maxHeight: 2532, quality: 70, lossless: false });
-  assert.equal(frameSettings({ ...options, compact: true }).quality, 55);
-  assert.equal(frameSettings({ ...options, native: true }).quality, 55);
+  assert.deepEqual(frameSettings(options), { maxWidth: 1170, maxHeight: 2532, quality: 80, lossless: false });
+  assert.equal(frameSettings({ ...options, compact: true }).quality, 72);
+  assert.equal(frameSettings({ ...options, native: true }).quality, 72);
   assert.deepEqual(frameSettings({ ...options, native: true, zoom: true }), {
-    maxWidth: 800, maxHeight: 1440, quality: 55, lossless: false,
+    maxWidth: 800, maxHeight: 1440, quality: 72, lossless: false,
   });
   assert.deepEqual(frameSettings({ ...options, zoom: true, shown: null }), frameSettings(options));
 });
 
-test("Quality Mode captures the whole displayed window losslessly with JPEG quality 95 fallback", () => {
+test("Quality Mode changes only bitrate and still refinement, preserving frame dimensions in every layout", () => {
   assert.deepEqual(frameSettings({ ...options, qualityMode: true }), {
-    maxWidth: 800, maxHeight: 1440, quality: 95, lossless: true,
+    maxWidth: 1170, maxHeight: 2532, quality: 92, lossless: true,
   });
-  assert.deepEqual(frameSettings({ ...options, qualityMode: true, compact: true, native: true, zoom: true, shown: null }), {
-    maxWidth: 1920, maxHeight: 1080, quality: 95, lossless: true,
-  });
-  assert.deepEqual(frameSettings({ ...options, qualityMode: true, shown: { width: 20000, height: 12000 } }), {
-    maxWidth: 8192, maxHeight: 8192, quality: 95, lossless: true,
-  });
+  for (const settings of [options,
+    { ...options, compact: true, native: true },
+    { ...options, zoom: true },
+    { ...options, zoom: true, shown: null },
+    { ...options, shown: { width: 20000, height: 12000 } },
+    { ...options, box: { width: 10000, height: 12000 } },
+  ]) {
+    const normal = frameSettings(settings);
+    assert.deepEqual(frameSettings({ ...settings, qualityMode: true }), { ...normal, quality: 92, lossless: true });
+  }
 });
 
 test("Quality Mode is remembered per host across screen and module instances for the session", async () => {

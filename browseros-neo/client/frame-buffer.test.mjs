@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bufferedFrame, frameImageUri, retainFrameImage, sameFramePixels } from "./frame-buffer.ts";
+import { bufferedFrame, decodedFrame, frameImageUri, retainFrameImage, sameFramePixels } from "./frame-buffer.ts";
 
 const old = {
   status: "ready", reason: null, windows: [], windowId: "0x1", windowWidth: 1840, windowHeight: 1048,
@@ -37,4 +37,29 @@ test("an unchanged displayed hash cannot inherit bytes from a different pending 
   assert.equal(sameFramePixels(pending, unchanged), false);
   assert.equal(sameFramePixels(null, unchanged), false);
   assert.equal(sameFramePixels(old, { ...unchanged, windowId: "0x2" }), false);
+});
+
+test("a completed decode displays without starvation, then only the newest received frame decodes next", () => {
+  const decoding = { ...old, hash: "b:motion", image: "jpeg-b" };
+  const skipped = { ...old, hash: "c:motion", image: "jpeg-c" };
+  const newest = { ...old, hash: "d:motion", image: "jpeg-d" };
+  assert.equal(decodedFrame(skipped, decoding), decoding);
+  assert.equal(decodedFrame(newest, decoding), decoding);
+  assert.equal(bufferedFrame(newest, [old, decoding]), newest);
+  assert.equal(decodedFrame(newest, newest), newest);
+  assert.equal(decodedFrame(null, newest), null);
+  const refined = { ...newest, hash: "d:still", mimeType: "image/png", image: "png-d" };
+  assert.equal(decodedFrame(refined, newest), newest);
+  assert.equal(bufferedFrame(refined, [decoding, newest]), refined);
+  assert.equal(decodedFrame(refined, refined), refined);
+  assert.equal(sameFramePixels(newest, refined), false);
+  assert.equal(decodedFrame({ ...newest, windowId: "0x2" }, decoding), null);
+  assert.equal(decodedFrame({ ...newest, status: "not-running" }, decoding), null);
+});
+
+test("a completed decode can use newer geometry metadata only when the frame id matches", () => {
+  const resized = { ...old, changed: false, image: null, windowWidth: 920, windowHeight: 524 };
+  assert.deepEqual(decodedFrame(resized, old), { ...resized, image: old.image });
+  const later = { ...resized, hash: "b", image: "jpeg-b" };
+  assert.equal(decodedFrame(later, old), old);
 });

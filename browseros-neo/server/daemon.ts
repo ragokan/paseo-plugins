@@ -1,49 +1,40 @@
-import { spawn } from "node:child_process";
-import { access, constants } from "node:fs/promises";
-import { delimiter, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
+import type { RpcInput } from "@getpaseo/plugin";
+import { readFrame } from "../shared/contracts.ts";
 import type { Frame } from "../shared/contracts.ts";
-import { fitDisplay, launchBrowser, readFrame, sendInput } from "../shared/contracts.ts";
-import { DesktopHelper, desktopEnvironment, type HelperTransport } from "./helper.ts";
-import { DisplayFitter, type DisplayGeometry } from "./display.ts";
+import { createBackend, unavailable, type BrowserBackend, type CaptureInput } from "./backend.ts";
 
 type FrameInput = RpcInput<typeof readFrame>;
-type CaptureInput = Pick<FrameInput, "windowId" | "maxWidth" | "maxHeight" | "quality" | "lossless">;
-type InputResult = RpcOutput<typeof sendInput>;
-
-function unavailable(error: unknown): Frame {
-  return {
-    status: "unsupported", reason: error instanceof Error ? error.message : String(error),
-    windows: [], windowId: null, windowWidth: 0, windowHeight: 0, hash: null,
-    changed: false, image: null, mimeType: "image/jpeg", imageWidth: 0, imageHeight: 0,
-  };
-}
 
 export class BrowserDaemon {
   private stopped = false;
   private captures = new Map<string, { at: number; result: Promise<Frame>; pending: boolean }>();
   private defaultWindow: string | null = null;
   private waits = new Set<() => void>();
-  private readonly helper: HelperTransport;
-  private readonly display: DisplayFitter;
+  private readonly backend: BrowserBackend;
 
-  constructor(helper: HelperTransport = new DesktopHelper()) {
-    this.helper = helper;
-    this.display = new DisplayFitter({
-      readDesktop: () => this.helper.request<DisplayGeometry>("display", {}),
-      onChange: () => this.captures.clear(),
-    });
+  constructor(backend?: BrowserBackend) {
+    this.backend = backend ?? createBackend(process.platform, () => this.captures.clear());
   }
 
-  private capture(input: CaptureInput): Promise<Frame> {
+  private async capture(input: CaptureInput): Promise<Frame> {
     const key = JSON.stringify([input.windowId ?? this.defaultWindow, input.maxWidth, input.maxHeight, input.quality, input.lossless ?? false]);
     const existing = this.captures.get(key);
-    if (existing && (existing.pending || performance.now() - existing.at < 60)) return existing.result;
+    if (existing && (existing.pending || performance.now() - existing.at < 60)) {
+      const shared = await existing.result;
+      // A recent capture is useful only if this viewer has not received it.
+      if (shared.hash !== input.since) return shared;
+      // Another caller may already have started the fresh capture while this
+      // one awaited the old result. Join that capture and check its id too.
+      if (this.captures.get(key) !== existing) return this.capture(input);
+    }
     const entry = { at: performance.now(), pending: true, result: Promise.resolve(null as unknown as Frame) };
     entry.result = (async () => {
       const previous = await existing?.result;
-      let frame = await this.helper.request<Frame>("frame", { ...input, since: previous?.hash ?? null });
+      let frame = await this.backend.capture({
+        ...input, since: input.since ?? previous?.hash ?? null,
+        includeImage: !previous?.image || (input.since !== null && input.since !== previous.hash),
+      });
       // The helper omits unchanged image bytes. Keep them here so a new viewer
       // sharing this capture can still receive the image it does not have yet.
       if (frame.image === null && frame.hash && frame.hash === previous?.hash) {
@@ -77,7 +68,7 @@ export class BrowserDaemon {
   }
 
   readFrame = async (input: FrameInput): Promise<Frame> => {
-    this.display.frameRead();
+    this.backend.frameRead();
     const deadline = performance.now() + input.waitMs;
     while (!this.stopped) {
       const frame = await this.capture(input);
@@ -86,63 +77,36 @@ export class BrowserDaemon {
       const result = { ...frame, changed, image: changed ? frame.image : null };
       const remaining = deadline - performance.now();
       if (changed || frame.status !== "ready" || !frame.hash || remaining <= 0) return result;
-      await this.wait(Math.min(90, remaining));
+      const capturedAt = performance.now();
+      while (!this.stopped) {
+        const left = deadline - performance.now();
+        if (left <= 0) return result;
+        await this.wait(Math.min(10, left));
+        if (this.stopped) break;
+        const state = await this.backend.changed({ ...input, windowId: frame.windowId, since: frame.hash });
+        const age = performance.now() - capturedAt;
+        if (state.supported ? state.changed || age >= 1000 : age >= 33) break;
+      }
     }
     return unavailable("The BrowserOS plugin has stopped.");
   };
 
-  fitDisplay = (input: RpcInput<typeof fitDisplay>): Promise<RpcOutput<typeof fitDisplay>> => this.display.fit(input);
+  fitDisplay = (input: Parameters<BrowserBackend["fitDisplay"]>[0]) => this.backend.fitDisplay(input);
 
-  sendInput = async (input: RpcInput<typeof sendInput>): Promise<InputResult> => {
-    try {
-      const characters = input.events.reduce((count, event) => count + (event.type === "text" ? event.text.length : 0), 0);
-      const result = await this.helper.request<InputResult>("input", input, Math.max(15_000, characters * 60 + 15_000));
-      return result;
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    } finally {
-      this.captures.clear();
-    }
+  sendInput = async (input: Parameters<BrowserBackend["sendInput"]>[0]) => {
+    try { return await this.backend.sendInput(input); }
+    finally { this.captures.clear(); }
   };
 
-  launchBrowser = async (): Promise<RpcOutput<typeof launchBrowser>> => {
-    if (this.stopped) return { ok: false, error: "The BrowserOS plugin has stopped." };
-    try {
-      const frame = await this.helper.request<Frame>("frame", { windowId: null, maxWidth: 64, maxHeight: 64, quality: 20 });
-      if (frame.windowId) {
-        const result = await this.helper.request<InputResult>("activate", { windowId: frame.windowId });
-        this.captures.clear();
-        return result;
-      }
-      if (frame.status === "unsupported") return { ok: false, error: frame.reason };
-      const candidates = [
-        ...["browserclaw", "browseros"].flatMap((name) =>
-          (process.env.PATH ?? "").split(delimiter).filter(Boolean).map((directory) => join(directory, name))),
-        "/usr/bin/browserclaw", "/usr/lib/browserclaw/browserclaw", "/opt/browseros/browseros",
-      ];
-      let executable: string | undefined;
-      for (const candidate of candidates) {
-        try { await access(candidate, constants.X_OK); executable = candidate; break; } catch { /* Try the next launcher. */ }
-      }
-      if (!executable) return { ok: false, error: "BrowserOS was not found. Looked for browserclaw and browseros on PATH, /usr/bin/browserclaw, /usr/lib/browserclaw/browserclaw and /opt/browseros/browseros." };
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(executable, [], { detached: true, stdio: "ignore", env: desktopEnvironment() });
-        child.once("error", reject);
-        child.once("spawn", () => { child.unref(); resolve(); });
-      });
-      this.captures.clear();
-      return { ok: true, error: null };
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+  launchBrowser = async () => {
+    try { return await this.backend.launchBrowser(); }
+    finally { this.captures.clear(); }
   };
 
   async stop(): Promise<void> {
     this.stopped = true;
     for (const finish of this.waits) finish();
     this.captures.clear();
-    const restored = await this.display.stop();
-    if (!restored.ok) console.error(`BrowserOS display restore failed: ${restored.error}`);
-    await this.helper.stop();
+    await this.backend.stop();
   }
 }

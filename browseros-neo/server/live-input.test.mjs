@@ -92,7 +92,8 @@ print(json.dumps(dict(captured=captured, children=children)))
     const unicodePath = join(tmpdir(), "browseros-neo-input-unicode.jpg");
     await writeFile(unicodePath, Buffer.from(unicodeFrame.image, "base64"));
     t.diagnostic(`Typed Unicode frame: ${unicodePath}`);
-    const losslessFrame = await daemon.readFrame({ ...owned, lossless: true });
+    const motion = await daemon.readFrame({ ...owned, lossless: true });
+    const losslessFrame = await daemon.readFrame({ ...owned, lossless: true, since: motion.hash, waitMs: 1000 });
     assert.equal(losslessFrame.mimeType, "image/png");
     assert.match(losslessFrame.image, /^iVBORw0KGgo/);
 
@@ -116,7 +117,8 @@ d.x.XSync(d.display, 0)
     assert.equal(minimizedPng.image, null);
     const resized = await daemon.readFrame({ ...owned, maxWidth: 900 });
     assert.ok(resized.image && resized.imageWidth <= 900);
-    const resizedPng = await daemon.readFrame({ ...owned, lossless: true, maxWidth: 900 });
+    const resizedMotion = await daemon.readFrame({ ...owned, lossless: true, maxWidth: 900 });
+    const resizedPng = await daemon.readFrame({ ...owned, lossless: true, maxWidth: 900, since: resizedMotion.hash, waitMs: 1000 });
     assert.equal(resizedPng.mimeType, "image/png");
     assert.ok(resizedPng.image && resizedPng.imageWidth <= 900);
     const cold = new DesktopHelper();
