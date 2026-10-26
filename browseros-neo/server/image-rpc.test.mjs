@@ -22,7 +22,7 @@ print(json.dumps([image.get_width(), image.get_height()]))
   return JSON.parse(result.stdout);
 }
 
-test("live Quality Mode uses JPEG during motion and PNG when BrowserOS settles", async (t) => {
+test("live Quality Mode uses JPEG during motion and PNG when BrowserOS settles", { skip: process.platform !== "linux" }, async (t) => {
   const handlers = new Map();
   const cleanup = contribute({ handle(contract, handler) { handlers.set(contract.name, handler); } });
   try {
@@ -50,7 +50,7 @@ test("live Quality Mode uses JPEG during motion and PNG when BrowserOS settles",
   } finally { await cleanup(); }
 });
 
-test("near-limit PNG traverses the real JSONL pipe and registered RPC; oversized PNG falls back", async (t) => {
+test("near-limit PNG traverses the real JSONL pipe and registered RPC; oversized PNG falls back", { skip: process.platform !== "linux" }, async (t) => {
   const folder = await mkdtemp(join(tmpdir(), "browseros-quality-rpc-"));
   const executable = spawnSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
   assert.equal(executable.status, 0, executable.stderr);

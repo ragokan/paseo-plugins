@@ -18,6 +18,8 @@ export interface HelperTransport {
   stop(): Promise<void>;
 }
 
+type HelperCommand = { executable: string; args: string[]; env?: NodeJS.ProcessEnv };
+
 /** One sequential stream also makes input batches atomic, including across RPC callers. */
 export class DesktopHelper implements HelperTransport {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -28,8 +30,9 @@ export class DesktopHelper implements HelperTransport {
   private pending: { id: number; resolve(value: unknown): void; reject(error: Error): void } | null = null;
   private stderr = "";
   private readonly idleMs: number;
+  private readonly command?: HelperCommand;
 
-  constructor(idleMs = 30_000) { this.idleMs = idleMs; }
+  constructor(idleMs = 30_000, command?: HelperCommand) { this.idleMs = idleMs; this.command = command; }
 
   request<T>(method: string, params: unknown, timeoutMs = 15_000): Promise<T> {
     const result = this.queue.then(() => this.perform<T>(method, params, timeoutMs));
@@ -40,8 +43,8 @@ export class DesktopHelper implements HelperTransport {
   private start(): ChildProcessWithoutNullStreams {
     if (this.child) return this.child;
     this.stderr = "";
-    const child = spawn("python3", ["-u", "-c", helperSource], {
-      env: desktopEnvironment(),
+    const child = spawn(this.command?.executable ?? "python3", this.command?.args ?? ["-u", "-c", helperSource], {
+      env: this.command?.env ?? desktopEnvironment(),
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
@@ -60,7 +63,7 @@ export class DesktopHelper implements HelperTransport {
         this.fail(child, new Error("The BrowserOS desktop helper returned invalid JSON."));
       }
     });
-    child.on("error", (error) => this.fail(child, new Error(`Could not start Python 3: ${error.message}`)));
+    child.on("error", (error) => this.fail(child, new Error(`Could not start ${this.command?.executable ?? "Python 3"}: ${error.message}`)));
     child.stdin.on("error", (error) => this.fail(child, error));
     child.on("exit", (code, signal) => {
       this.fail(child, new Error(`The BrowserOS desktop helper exited (${signal ?? code}). ${this.stderr}`.trim()));
@@ -95,7 +98,7 @@ export class DesktopHelper implements HelperTransport {
     } finally {
       clearTimeout(timeout);
       this.pending = null;
-      if (!this.stopped && this.child) {
+      if (!this.stopped && this.child && this.idleMs > 0) {
         this.idleTimer = setTimeout(() => {
           if (this.child === child) {
             this.child = null;

@@ -12,6 +12,10 @@ export type DisplayGeometry = {
 };
 export type FitResult = RpcOutput<typeof fitDisplay>;
 export type CommandRunner = (args: string[]) => Promise<string>;
+export type GeometryDriver = {
+  apply(target: Size): Promise<FitResult>;
+  restore(): Promise<FitResult>;
+};
 
 const execute = promisify(execFile);
 const virtualName = /^(DUMMY|VIRTUAL|VNC|XVFB)/i;
@@ -119,16 +123,21 @@ export class DisplayFitter {
   private currentTarget: Size | null = null;
   private original: (Size & { output: string; mode: string; at: number }) | null = null;
   private modes = new Map<string, { output: string; attached: boolean }>();
+  private readonly geometry?: GeometryDriver;
+  private geometryAt = 0;
 
   constructor(options: {
     run?: CommandRunner;
-    readDesktop: () => Promise<DisplayGeometry>;
+    readDesktop?: () => Promise<DisplayGeometry>;
+    /** Native window fitting shares the same serialization, debounce and idle restore. */
+    geometry?: GeometryDriver;
     onChange?: () => void;
     debounceMs?: number;
     idleMs?: number;
   }) {
     this.run = options.run ?? runXrandr;
-    this.readDesktop = options.readDesktop;
+    this.readDesktop = options.readDesktop ?? (() => Promise.reject(new Error("No desktop geometry reader.")));
+    this.geometry = options.geometry;
     this.onChange = options.onChange ?? (() => {});
     this.debounceMs = options.debounceMs ?? 300;
     this.idleMs = options.idleMs ?? 60_000;
@@ -170,6 +179,12 @@ export class DisplayFitter {
   private async apply(target: Size): Promise<FitResult> {
     let applied = false;
     try {
+      if (this.geometry) {
+        this.geometryAt ||= Date.now();
+        const result = await this.geometry.apply(target);
+        if (result.ok) this.onChange();
+        return result;
+      }
       if (equal(this.currentTarget, target)) return success(target);
       const state = parseXrandr(await this.run(["--query"]));
       const output = state.outputs.find((item) => item.primary) ?? state.outputs[0];
@@ -234,14 +249,14 @@ export class DisplayFitter {
     if (errors.length) throw new Error(errors.join("\n"));
   }
 
-  private idleDeadline(): number { return (this.lastFrameAt || this.original?.at || 0) + this.idleMs; }
+  private idleDeadline(): number { return (this.lastFrameAt || this.original?.at || this.geometryAt) + this.idleMs; }
 
   private armIdle(): void {
     clearTimeout(this.idleTimer);
-    if (!this.original || this.stopped) return;
+    if ((!this.original && !this.geometryAt) || this.stopped) return;
     this.idleTimer = setTimeout(() => {
       void this.serialize(async () => {
-        if (this.stopped || !this.original) return;
+        if (this.stopped || (!this.original && !this.geometryAt)) return;
         // A frame may have arrived while this restore waited for an xrandr operation.
         if (Date.now() < this.idleDeadline()) { this.armIdle(); return; }
         const result = await this.restore();
@@ -253,6 +268,13 @@ export class DisplayFitter {
 
   private async restore(): Promise<FitResult> {
     clearTimeout(this.idleTimer);
+    if (this.geometry && this.geometryAt) {
+      try {
+        const result = await this.geometry.restore();
+        if (result.ok) { this.geometryAt = 0; this.onChange(); }
+        return result;
+      } catch (error) { return failure(error); }
+    }
     if (!this.original) return success({ width: 0, height: 0 });
     try {
       const original = this.original;

@@ -167,7 +167,7 @@ test("expected helper failures are returned through the contracts", async () => 
   } finally { await daemon.stop(); }
 });
 
-test("live registered RPC captures a BrowserOS JPEG and long polls", async (t) => {
+test("live registered RPC captures a BrowserOS JPEG and long polls", { skip: process.platform !== "linux" }, async (t) => {
   const handlers = new Map();
   const cleanup = contribute({ handle(contract, handler) { handlers.set(contract.name, handler); } });
   const read = handlers.get("frame.read");

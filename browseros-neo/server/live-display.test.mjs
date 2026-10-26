@@ -8,7 +8,7 @@ import { DesktopHelper } from "./helper.ts";
 
 // Opt in: this changes the real virtual desktop, including the RustDesk view.
 test("live display fit resizes the maximized BrowserOS window and restores the screen", {
-  skip: process.env.PASEO_BROWSEROS_DISPLAY_TEST !== "1",
+  skip: process.platform !== "linux" || process.env.PASEO_BROWSEROS_DISPLAY_TEST !== "1",
 }, async (t) => {
   const helper = new DesktopHelper();
   const handlers = new Map();
@@ -92,7 +92,7 @@ print(json.dumps(dict(width=width, height=height, nonBlackFraction=nonblack / (w
 }
 
 test("live long-lived capture follows a taller phone resize without black bottom rows", {
-  skip: process.env.PASEO_BROWSEROS_DISPLAY_TEST !== "1",
+  skip: process.platform !== "linux" || process.env.PASEO_BROWSEROS_DISPLAY_TEST !== "1",
 }, async (t) => {
   const helper = new DesktopHelper();
   const fresh = new DesktopHelper();

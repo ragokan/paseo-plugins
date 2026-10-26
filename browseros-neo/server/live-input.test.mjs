@@ -11,7 +11,7 @@ import { helperSource } from "./helper-source.ts";
 
 // Opt in because this briefly brings a newly created window onto the user's desktop.
 test("live input types into and closes only its own BrowserOS window", {
-  skip: process.env.PASEO_BROWSEROS_INPUT_TEST !== "1",
+  skip: process.platform !== "linux" || process.env.PASEO_BROWSEROS_INPUT_TEST !== "1",
 }, async (t) => {
   const daemon = new BrowserDaemon();
   const settings = { windowId: null, maxWidth: 1400, maxHeight: 1000, quality: 85, since: null, waitMs: 0 };

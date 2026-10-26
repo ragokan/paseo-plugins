@@ -2,6 +2,8 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { Frame } from "../shared/contracts.ts";
 import { fitDisplay, launchBrowser, readFrame, sendInput } from "../shared/contracts.ts";
 import { LinuxBackend } from "./linux.ts";
+import { MacOSBackend } from "./macos.ts";
+export { MacOSBackend } from "./macos.ts";
 
 export type CaptureInput = Omit<RpcInput<typeof readFrame>, "waitMs"> & {
   /** Populate Node's image cache even if this caller already has the frame. */
@@ -41,15 +43,8 @@ export class UnsupportedBackend implements BrowserBackend {
   async stop(): Promise<void> {}
 }
 
-export class MacOSBackend extends UnsupportedBackend {
-  constructor() { super("BrowserOS remote display on macOS is not implemented yet."); }
-  // TODO(macOS): embedded Swift helper, asynchronous compile cache, permissions,
-  // ScreenCaptureKit app-filtered capture, CGEvent input and AX window fitting.
-  // Native work is deferred until it can be compiled and exercised on the Mac.
-}
-
 export function createBackend(platform: NodeJS.Platform, onChange = () => {}): BrowserBackend {
   if (platform === "linux") return new LinuxBackend(undefined, onChange);
-  if (platform === "darwin") return new MacOSBackend();
+  if (platform === "darwin") return new MacOSBackend(undefined, onChange);
   return new UnsupportedBackend(`BrowserOS remote display does not support ${platform}.`);
 }
