@@ -389,6 +389,9 @@ export interface SendDeps {
   send(agentId: string, text: string, opts: { messageId: string; activeTurnBehavior?: "steer"; title: string; attachmentText: string }): Promise<void>;
   // Sends per run id since the plugin loaded, so every press is its own message.
   sendCounts: Map<string, number>;
+  // Random, once per plugin load. Paseo keeps delivery receipts on disk and drops a repeat id,
+  // and the counts start over after a reload or a daemon restart.
+  loadId: string;
 }
 
 export const PERMISSION_PENDING = "The agent is waiting for your approval. Approve or deny that first.";
@@ -408,7 +411,7 @@ export async function sendToClaude(deps: SendDeps, input: { agentId: string; run
   const n = deps.sendCounts.get(input.runId) ?? 0;
   const report = await reportWithLog(deps.logs, input.agentId, row);
   try {
-    await deps.send(input.agentId, report.visible, { messageId: `shell-yeah:${input.runId}:${n}`, ...(steer ? { activeTurnBehavior: "steer" as const } : {}), title: report.title, attachmentText: report.text });
+    await deps.send(input.agentId, report.visible, { messageId: `shell-yeah:${input.runId}:${deps.loadId}:${n}`, ...(steer ? { activeTurnBehavior: "steer" as const } : {}), title: report.title, attachmentText: report.text });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/agent_request_key_conflict|agent_request_outcome_unknown/.test(message)) {

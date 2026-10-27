@@ -90,14 +90,45 @@ test("cursor moves stop at the line limit and a screen's height, so a few bytes 
     assert.equal(only.length, 4_001, JSON.stringify(move));
     assert.ok(only.startsWith("x ") && only.endsWith("…"));
   }
-  for (const move of [`${ESC}[999999999B`, `${ESC}[999999999E`, `${ESC}[999999999;1H`]) {
+  // A jump stops at the screen's bottom row.
+  for (const [move, total] of [[`${ESC}[999999999B`, ROWS + 1], [`${ESC}[999999999E`, ROWS + 1], [`${ESC}[999999999;1H`, ROWS]] as const) {
     const screen = createScreen();
     screen.write(`top${move}bottom`);
-    assert.equal(screen.tail(1).total, ROWS + 1, JSON.stringify(move));
+    assert.equal(screen.tail(1).total, total, JSON.stringify(move));
   }
   const flood = createScreen({ maxLines: 100, maxLineChars: 4_000 });
   for (let i = 0; i < 10_000; i++) flood.write(`${ESC}[999999999;1H${ESC}[999999999B`);
   assert.equal(flood.text().split("\n").length, 100);
+});
+
+test("cursor addressing counts rows from the top of the 40-row screen, not from the first line kept", () => {
+  // 50 lines and the cursor's empty line: the screen starts at line 12.
+  const fifty = Array.from({ length: 50 }, (_, i) => `line ${i + 1}\r\n`).join("");
+  assert.equal(lines(`${fifty}${ESC}[1;1HX`, 60)[11], "Xine 12");
+  assert.equal(lines(`${fifty}${ESC}[3;5fX`, 60)[13], "lineX14");
+  assert.equal(lines(`${fifty}${ESC}[999AX`, 60)[11], "Xine 12", "cursor-up stops at the top of the screen");
+  // Save and restore come back to the same place on the screen, even when the jump in between added rows.
+  const out = lines(`one\r\n${ESC}7${ESC}[${ROWS};1Hstatus${ESC}8two`);
+  assert.deepEqual([out[0], out[1], out.at(-1)], ["one", "two", "status"]);
+});
+
+test("apt's progress bar, drawn on the bottom row it keeps out of the scroll region, never lands in the output", () => {
+  const screen = createScreen();
+  const history = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
+  const later = Array.from({ length: 50 }, (_, i) => `Setting up package-${i + 1} ...`);
+  // What apt writes (apt-pkg/install-progress.cc): it shrinks the scroll region to free the bottom row,
+  const region = (bottom: number) => `\n${ESC}7${ESC}[0;${bottom}r${ESC}8${ESC}[1A`;
+  // draws the bar there between a save and a restore of the cursor,
+  const bar = (percent: number) => `${ESC}7${ESC}[${ROWS};0f${ESC}[42m${ESC}[30mProgress: [${String(percent).padStart(3)}%]${ESC}[49m${ESC}[39m [####......] ${ESC}8`;
+  // and when it's done, gives the row back and clears below the cursor.
+  screen.write(history.map((line) => `${line}\r\n`).join("") + region(ROWS - 1));
+  for (const [i, line] of later.entries()) screen.write(`${bar(i * 2)}${line}\r\n`);
+  screen.write(`${region(ROWS)}${ESC}[Jdone\r\n`);
+  assert.equal(screen.text(), [...history, ...later, "done"].join("\n"));
+});
+
+test("private sequences such as vim's CSI >4;1m are not styles", () => {
+  assert.deepEqual(lines(`${ESC}[>4;1mplain${ESC}[?1m text${ESC}[=1m`), ["plain text"]);
 });
 
 test("the trailing empty line is not a line; a note is its own dim line", () => {

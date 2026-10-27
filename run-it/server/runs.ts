@@ -505,26 +505,29 @@ const STRIP = ["PASEO_NODE_ENV", "PASEO_DESKTOP_MANAGED", "PASEO_SUPERVISED", "E
 
 // The user's environment minus what Paseo's worker put in, plus what makes tools
 // print color to a pipe. FORCE_COLOR=1 means 16 colors on purpose: the row
-// re-themes exactly those 16; 256-color and truecolor would bypass the theme.
+// re-themes exactly those 16; 256-color and truecolor would bypass the theme. In a
+// terminal nothing is forced, so a tool's hex or 256-color styles show as they are,
+// unthemed; its named colors still come out as the 16.
 export function commandEnv(base: NodeJS.ProcessEnv, cwd: string, terminal = false): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
   for (const key of STRIP) delete env[key];
   Object.assign(env, {
     PWD: cwd,
-    FORCE_COLOR: "1",
-    CLICOLOR_FORCE: "1",
-    CARGO_TERM_COLOR: "always",
-    PY_COLORS: "1",
     PYTHONUNBUFFERED: "1",
     TERM: "xterm-256color",
     COLUMNS: "100",
     // npm prints its "new version available" banner when it thinks a person is watching.
     npm_config_update_notifier: "false",
   });
-  // A terminal makes git, man and the like open a pager and wait for a keypress.
+  // A terminal makes git, man and the like open a pager and wait for a keypress. Tools color
+  // their output there by themselves, and not what goes to a file or a pipe (`git diff > fix.patch`).
   if (terminal) Object.assign(env, { PAGER: "cat", GIT_PAGER: "cat" });
-  if (env.GIT_CONFIG_COUNT === undefined) {
-    Object.assign(env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "color.ui", GIT_CONFIG_VALUE_0: "always" });
+  else {
+    // A pipe looks like a file to them, so color is forced.
+    Object.assign(env, { FORCE_COLOR: "1", CLICOLOR_FORCE: "1", CARGO_TERM_COLOR: "always", PY_COLORS: "1" });
+    if (env.GIT_CONFIG_COUNT === undefined) {
+      Object.assign(env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "color.ui", GIT_CONFIG_VALUE_0: "always" });
+    }
   }
   return env;
 }

@@ -57,6 +57,12 @@ export function createScreen(limits: ScreenLimits = DEFAULT_SCREEN_LIMITS): Scre
   const pen: Pen = { attrs: new Set(), fg: null, bg: null };
   let penKey = "";
   const interned = new Map<string, string>();
+  // ESC 7's cursor, as a row of the screen, as a terminal keeps it.
+  let saved: { row: number; col: number } | null = null;
+  // The scroll region's last screen row. apt keeps the rows below it for its progress bar,
+  // and while the cursor is down there, what it writes stays out of the output.
+  let regionBottom = ROWS;
+  let belowRegion = false;
 
   function emptyRow(): Row {
     return { segs: [], len: 0, clamped: false };
@@ -80,12 +86,18 @@ export function createScreen(limits: ScreenLimits = DEFAULT_SCREEN_LIMITS): Scre
     trimRows();
   }
 
+  // The screen is the last ROWS rows; cursor addressing counts from its top, not the first line kept.
+  function top(): number {
+    return Math.max(0, rows.length - ROWS);
+  }
+
   // A line is cut at maxLineChars, so the cursor never needs to go further right.
   function toCol(target: number): number {
     return Math.max(0, Math.min(target, limits.maxLineChars));
   }
 
   function newline() {
+    if (belowRegion) return;
     moveTo(row + 1);
     col = 0;
   }
@@ -125,7 +137,7 @@ export function createScreen(limits: ScreenLimits = DEFAULT_SCREEN_LIMITS): Scre
 
   function put(text: string) {
     const r = rows[row];
-    if (r.clamped) return;
+    if (r.clamped || belowRegion) return;
     const len = codePoints(text);
     if (col === r.len) {
       appendSeg(r, text, len, penKey);
@@ -163,32 +175,38 @@ export function createScreen(limits: ScreenLimits = DEFAULT_SCREEN_LIMITS): Scre
   }
 
   function csi(params: string, final: string) {
+    // A private prefix (CSI ?25l, vim's CSI >4;1m) makes it a mode or a query, none of the below.
+    if (/^[<=>?]/.test(params)) return;
     const nums = params.split(";").map((p) => (p === "" ? 0 : Number.parseInt(p, 10)));
     const n = Math.max(1, nums[0] || 0);
     switch (final) {
-      case "A": row = Math.max(0, row - n); break;
+      case "A": row = Math.max(top(), row - n); break;
       case "B": moveTo(row + n); break;
       case "C": col = toCol(col + n); break;
       case "D": col = Math.max(0, col - n); break;
       case "E": moveTo(row + n); col = 0; break;
-      case "F": row = Math.max(0, row - n); col = 0; break;
+      case "F": row = Math.max(top(), row - n); col = 0; break;
       case "G": col = toCol(n - 1); break;
       case "H":
       case "f": {
-        moveTo((nums[0] || 1) - 1);
+        const target = Math.min(nums[0] || 1, ROWS);
+        belowRegion = target > regionBottom;
+        if (!belowRegion) moveTo(top() + target - 1);
         col = toCol((nums[1] || 1) - 1);
         break;
       }
-      case "K": eraseLine(nums[0] || 0); break;
+      case "K": if (!belowRegion) eraseLine(nums[0] || 0); break;
       case "J": {
         const mode = nums[0] || 0;
-        if (mode === 0) {
+        if (mode === 0 && !belowRegion) {
           eraseLine(0);
           rows.length = row + 1;
         } else if (mode >= 2) clearAll();
         break;
       }
-      case "m": if (!params.startsWith("?")) applySgr(nums); break;
+      case "m": applySgr(nums); break;
+      // A terminal also homes the cursor here; apt puts it back straight away.
+      case "r": regionBottom = Math.min(nums[1] || ROWS, ROWS); break;
       default: break;
     }
   }
@@ -248,6 +266,12 @@ export function createScreen(limits: ScreenLimits = DEFAULT_SCREEN_LIMITS): Scre
     }
     if (next === "(" || next === ")" || next === "*" || next === "+" || next === "#") {
       return text[i + 2] === undefined ? -1 : i + 3;
+    }
+    if (next === "7") saved = { row: row - top(), col };
+    else if (next === "8" && saved) {
+      belowRegion = false;
+      moveTo(top() + saved.row);
+      col = saved.col;
     }
     return i + 2;
   }

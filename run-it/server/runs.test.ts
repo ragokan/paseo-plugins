@@ -95,9 +95,9 @@ test("stdout and stderr arrive in the order the command wrote them", async () =>
   await h.registry.shutdown();
 });
 
-test("commands run in the given folder, with color forced and Paseo's worker variables gone", { timeout: 15_000 }, async () => {
+test("commands run in the given folder, with color forced on pipes and Paseo's worker variables gone", { timeout: 15_000 }, async () => {
   const cwd = dir();
-  const h = harness({ env: { ...process.env, PASEO_NODE_ENV: "x", ELECTRON_RUN_AS_NODE: "1", NO_COLOR: "1" } });
+  const h = harness({ terminal: "off", env: { ...process.env, PASEO_NODE_ENV: "x", ELECTRON_RUN_AS_NODE: "1", NO_COLOR: "1" } });
   const env = await ended(h.registry, await run(h.registry, "printenv FORCE_COLOR PASEO_NODE_ENV ELECTRON_RUN_AS_NODE NO_COLOR; echo end", cwd));
   assert.deepEqual(h.text(env.runId), ["1", "end"]);
   const where = await ended(h.registry, await run(h.registry, "pwd -P", cwd));
@@ -121,6 +121,14 @@ test("commandEnv keeps the user's PATH and git color, and does not override a gi
   assert.equal(env.GIT_CONFIG_COUNT, "2");
   assert.equal(env.PWD, "/w");
   assert.equal(commandEnv({}, "/w").GIT_CONFIG_VALUE_0, "always");
+});
+
+test("commandEnv forces color only on pipes: in a terminal, tools turn it on themselves and leave it out of files", () => {
+  const forced = ["FORCE_COLOR", "CLICOLOR_FORCE", "CARGO_TERM_COLOR", "PY_COLORS", "GIT_CONFIG_COUNT"];
+  const pipes = commandEnv({}, "/w", false);
+  assert.deepEqual(forced.filter((key) => pipes[key] === undefined), []);
+  const terminal = commandEnv({}, "/w", true);
+  assert.deepEqual(forced.filter((key) => terminal[key] !== undefined), []);
 });
 
 test("a missing folder is a failed row with a plain reason, published once, and nothing runs", async () => {
@@ -348,6 +356,20 @@ test("in a terminal: a real tty 100 columns wide, the exit code, no pager, and n
   assert.deepEqual(rest, []);
   const ok = await ended(h.registry, await run(h.registry, "echo done"));
   assert.deepEqual([ok.phase.kind, h.text(ok.runId)], ["ok", ["done"]]);
+  await h.registry.shutdown();
+});
+
+test("in a terminal: git colors the diff it shows, and `git diff > fix.patch` writes no color codes", { skip: noTerminal, timeout: 15_000 }, async () => {
+  const cwd = dir();
+  // The user's own git config stays out of it.
+  const h = harness({ env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+  const git = "git -c user.name=t -c user.email=t@t.test -c init.defaultBranch=main";
+  const id = await run(h.registry, `${git} init -q && echo a > f && ${git} add f && ${git} commit -qm a && echo b > f && git diff > fix.patch && git diff`, cwd);
+  const row = await ended(h.registry, id);
+  assert.equal(row.phase.kind, "ok");
+  assert.ok(row.output.lines.some((line) => typeof line !== "string"), "the diff on screen is colored");
+  assert.match(readFileSync(join(cwd, "fix.patch"), "utf8"), /^\+b$/m);
+  assert.doesNotMatch(readFileSync(join(cwd, "fix.patch"), "utf8"), /\x1b/);
   await h.registry.shutdown();
 });
 

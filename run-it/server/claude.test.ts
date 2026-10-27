@@ -256,6 +256,7 @@ function sendHarness(state: AgentState, opts: { held?: RunRow | null; fail?: str
       sent.push({ agentId, text, opts: options });
     },
     sendCounts: new Map(),
+    loadId: "load1",
   };
   return { deps, sent, marked, saves };
 }
@@ -285,7 +286,7 @@ test("every press is its own message; a receipt conflict reads as 'may already h
   const h = sendHarness({ status: "idle", pendingPermissions: 0 });
   await sendToClaude(h.deps, { agentId: "a", runId: "run000000001" });
   await sendToClaude(h.deps, { agentId: "a", runId: "run000000001" });
-  assert.deepEqual(h.sent.map((s) => s.opts.messageId), ["shell-yeah:run000000001:0", "shell-yeah:run000000001:1"]);
+  assert.deepEqual(h.sent.map((s) => s.opts.messageId), ["shell-yeah:run000000001:load1:0", "shell-yeah:run000000001:load1:1"]);
   const conflict = sendHarness({ status: "idle", pendingPermissions: 0 }, { fail: "agent_request_key_conflict" });
   await assert.rejects(sendToClaude(conflict.deps, { agentId: "a", runId: "run000000001" }), { message: MAYBE_SENT });
   assert.equal(conflict.deps.sendCounts.get("run000000001"), 1);
@@ -366,6 +367,7 @@ type Cursor = { epoch: string; seq: number };
 
 function fakeServer() {
   const appended: Array<{ agentId: string; id: string; data: RunRow }> = [];
+  const sent: Array<{ agentId: string; text: string; messageId: string }> = [];
   const fetches: Array<{ direction: string; limit: number | undefined }> = [];
   const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
   const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
@@ -380,6 +382,8 @@ function fakeServer() {
         cwd: "/w",
         status: "idle",
         pendingPermissions: [],
+        refresh: async () => undefined,
+        send: async (text: string, options: { messageId: string }) => { sent.push({ agentId, text, messageId: options.messageId }); },
         timeline: {
           append: async (item: { id: string; data: RunRow }) => {
             appended.push({ agentId, id: item.id, data: item.data });
@@ -416,7 +420,7 @@ function fakeServer() {
   const cleanup = contribute(server);
   const ctx = { paseo, signal: new AbortController().signal };
   return {
-    appended, fetches, ctx, cleanup, handlers, hooks, befores,
+    appended, sent, fetches, ctx, cleanup, handlers, hooks, befores,
     loadProviderHistory: (items: unknown[]) => { history = items.map((item) => ({ item: item as Entry["item"] })); },
     history: () => history.map((e) => e.item),
     record: (turnId: string, ...items: unknown[]) => { history.push(...items.map((item) => ({ item: item as Entry["item"], turnId }))); },
@@ -537,6 +541,19 @@ test("the Run window lists every command in the latest reply, prose included, an
   assert.deepEqual(await suggest({ agentId: "a" }, s.ctx), { commands: [] });
   assert.equal(s.appended.length, 0, "listing shows no cards");
   await s.cleanup();
+});
+
+test("Send after a plugin reload is a new message, not a repeat id whose receipt Paseo already completed", async () => {
+  const ids: string[] = [];
+  for (const _load of [1, 2]) {
+    const s = fakeServer();
+    await s.handlers.get("shell-yeah.send")!({ agentId: "a", runId: "run000000001", fallback: row() }, s.ctx);
+    ids.push(...s.sent.map((m) => m.messageId));
+    await s.cleanup();
+  }
+  assert.equal(ids.length, 2);
+  assert.notEqual(ids[0], ids[1], "the send counts start over, so the id needs something new per load");
+  for (const id of ids) assert.match(id, /^shell-yeah:run000000001:/);
 });
 
 test("dismiss publishes a dismissed row from the card's own data", async () => {
