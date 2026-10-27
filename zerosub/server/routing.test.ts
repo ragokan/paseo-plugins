@@ -47,7 +47,6 @@ const base = {
   now: NOW,
   autoSwitch: true,
   balanceNewAgents: false,
-  portable: true,
 };
 
 describe("chooseAccount", () => {
@@ -143,6 +142,19 @@ describe("mostAvailable", () => {
     expect(mostAvailable(state, "claude", () => usage(20), NOW)?.id).toBe("claude-work");
   });
 
+  it("spreads picks in a row instead of piling onto the roomiest account", () => {
+    // work has a little more room, but three agents just opened on it; personal is about as roomy.
+    const recent = { accountId: "claude-work", family: "claude" as const, openedAt: "2026-09-23T11:30:00Z" };
+    const state = stateWith([account({ id: "claude-main", kind: "main", home: null }), account({ id: "claude-work" }), account({ id: "claude-personal" })], {
+      sessions: { a: recent, b: recent, c: recent },
+    });
+    const usageOf = (id: string) => usage({ "claude-main": 60, "claude-work": 10, "claude-personal": 12 }[id] ?? 0);
+    expect(mostAvailable(state, "claude", usageOf, NOW)?.id).toBe("claude-personal");
+    // Sessions from before the 5-hour window are already in the usage readings.
+    const old = { ...recent, openedAt: "2026-09-23T05:00:00Z" };
+    expect(mostAvailable({ ...state, sessions: { a: old, b: old, c: old } }, "claude", usageOf, NOW)?.id).toBe("claude-work");
+  });
+
   it("never picks a signed-out account", () => {
     const main = account({ id: "claude-main", kind: "main", home: null, signedIn: false });
     const state = stateWith([main]);
@@ -150,30 +162,12 @@ describe("mostAvailable", () => {
   });
 });
 
-describe("non-portable conversations (Codex)", () => {
-  const main = account({ id: "codex-main", family: "codex", kind: "main", home: null });
-  const work = account({ id: "codex-work", family: "codex" });
-  const codex = { ...base, family: "codex" as const, portable: false };
-
-  it("pins a thread to the account it first opens on", () => {
-    const decision = chooseAccount(stateWith([main, work]), { ...codex, reason: "resume", usageOf: () => null });
-    expect(decision?.account.id).toBe("codex-main");
-    expect(decision?.bind).toMatchObject({ accountId: "codex-main", source: "thread" });
-  });
-
-  it("keeps an existing thread on its exhausted account instead of breaking it", () => {
-    const limited = account({ id: "codex-main", family: "codex", kind: "main", home: null, limitedUntil: "2026-09-23T14:00:00Z" });
-    const state = stateWith([limited, work], {
-      bindings: { "agent-1": { accountId: "codex-main", source: "thread", at: "x" } },
-    });
-    expect(chooseAccount(state, { ...codex, reason: "resume", usageOf: () => null })?.account.id).toBe("codex-main");
-  });
-
-  it("starts new agents on a usable account", () => {
-    const limited = account({ id: "codex-main", family: "codex", kind: "main", home: null, limitedUntil: "2026-09-23T14:00:00Z" });
-    const decision = chooseAccount(stateWith([limited, work]), { ...codex, reason: "create", usageOf: () => null });
-    expect(decision?.account.id).toBe("codex-work");
-    expect(decision?.bind).toMatchObject({ accountId: "codex-work", source: "thread" });
+describe("Codex", () => {
+  it("keeps an agent an older release pinned to its thread on that account", () => {
+    const main = account({ id: "codex-main", family: "codex", kind: "main", home: null });
+    const state = stateWith([main], { bindings: { "agent-1": { accountId: "codex-main", source: "thread", at: "x" } } });
+    const decision = chooseAccount(state, { ...base, family: "codex", reason: "resume", usageOf: () => null });
+    expect(decision).toMatchObject({ account: { id: "codex-main" }, bind: null });
   });
 });
 
@@ -206,30 +200,6 @@ describe("disabled accounts", () => {
     const decision = chooseAccount(state, { ...base, autoSwitch: false, reason: "resume", usageOf: () => null });
     expect(decision?.account.id).toBe("claude-work");
     expect(decision?.bind).toBeNull();
-  });
-
-  it("pins a new ChatGPT thread where it actually starts", () => {
-    const codexMain = account({ id: "codex-main", family: "codex", kind: "main", home: null, ...off });
-    const codexWork = account({ id: "codex-work", family: "codex" });
-    const decision = chooseAccount(stateWith([codexMain, codexWork]), {
-      ...base,
-      family: "codex",
-      portable: false,
-      reason: "create",
-      usageOf: () => null,
-    });
-    expect(decision?.account.id).toBe("codex-work");
-    expect(decision?.bind).toMatchObject({ accountId: "codex-work", source: "thread" });
-  });
-
-  it("leaves an existing ChatGPT thread on its disabled account, since it can't move", () => {
-    const codexMain = account({ id: "codex-main", family: "codex", kind: "main", home: null });
-    const codexWork = account({ id: "codex-work", family: "codex", ...off });
-    const state = stateWith([codexMain, codexWork], {
-      bindings: { "agent-1": { accountId: "codex-work", source: "thread", at: "2026-09-23T00:00:00Z" } },
-    });
-    const decision = chooseAccount(state, { ...base, family: "codex", portable: false, reason: "resume", usageOf: () => null });
-    expect(decision?.account.id).toBe("codex-work");
   });
 
   it("is never the most available account", () => {

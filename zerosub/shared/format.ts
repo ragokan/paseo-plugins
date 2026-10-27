@@ -57,12 +57,6 @@ export function formatPlan(plan: string | null): string | null {
   return PLAN_LABELS[key] ?? plan.charAt(0).toUpperCase() + plan.slice(1);
 }
 
-/** Short name for a composer pill: the nickname, trimmed to fit. */
-export function shortLabel(account: Pick<AccountView, "label">, max = 18): string {
-  const label = account.label.trim();
-  return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
-}
-
 /** One line summarising an account's headroom, e.g. "42% of 5-hour used · resets in 2h". */
 /**
  * The line under an account's name: its email, plus its organization when that adds something.

@@ -48,8 +48,6 @@ export const ReopenSummarySchema = z.object({
   /** Busy agents move when their current turn ends. */
   deferred: z.array(z.string()),
   failed: z.array(z.object({ agentId: z.string(), error: z.string() })),
-  /** A conversation that could not move in place and continues in this account's agent instead. */
-  continuedIn: z.object({ agentId: z.string(), title: z.string() }).nullable().default(null),
 });
 export type ReopenSummary = z.infer<typeof ReopenSummarySchema>;
 
@@ -106,17 +104,7 @@ export const setDefaultAccount = defineRpc({
 export const setAccountEnabled = defineRpc({
   name: "zerosub.accounts.enabled",
   input: z.object({ accountId: z.string(), enabled: z.boolean() }),
-  output: ReopenSummarySchema.extend({
-    /** ChatGPT conversations that stay on the disabled account because they can't change accounts. */
-    stayed: z.number(),
-  }),
-});
-
-/** Carries an agent's work on in a new agent on the other provider (Claude ↔ ChatGPT). */
-export const forkAgent = defineRpc({
-  name: "zerosub.agents.fork",
-  input: z.object({ agentId: z.string() }),
-  output: z.object({ agentId: z.string(), title: z.string() }),
+  output: ReopenSummarySchema,
 });
 
 export const setAgentAccount = defineRpc({

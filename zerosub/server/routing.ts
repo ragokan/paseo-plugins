@@ -4,7 +4,6 @@ import {
   accountsOf,
   defaultAccount,
   findAccount,
-  mainAccount,
   type Binding,
   type StoredAccount,
   type StoredState,
@@ -20,13 +19,21 @@ export function isUsable(account: StoredAccount, now: number): boolean {
   return account.signedIn && !account.disabled && !isLimited(account, now);
 }
 
+/**
+ * Points of usage each session opened on an account in the last 5 hours counts for, so agents moved
+ * one after another spread out: the usage readings don't change between picks. Older sessions are
+ * in the readings already.
+ */
+const SESSION_LOAD = 5;
+const SESSION_WINDOW_MS = 5 * 60 * 60_000;
+
 /** Lower is better. Unknown usage ranks in the middle so a known-quiet account wins over a mystery. */
 export function headroomScore(usage: Usage | null | undefined): number {
   const peak = usage ? peakUsage(usage.windows) : null;
   return peak ? peak.usedPercent : 50;
 }
 
-/** The usable account with the most room, preferring the default, then the CLI login, on ties. */
+/** The usable account with the most room, less its recent sessions, preferring the default, then the CLI login, on ties. */
 export function mostAvailable(
   state: StoredState,
   family: Family,
@@ -38,8 +45,12 @@ export function mostAvailable(
   const candidates = accountsOf(state, family).filter(
     (account) => !exclude.has(account.id) && isUsable(account, now),
   );
+  const recent = new Map<string, number>();
+  for (const session of Object.values(state.sessions)) {
+    if (now - (Date.parse(session.openedAt) || 0) < SESSION_WINDOW_MS) recent.set(session.accountId, (recent.get(session.accountId) ?? 0) + 1);
+  }
   const rank = (account: StoredAccount) => [
-    headroomScore(usageOf(account.id)),
+    headroomScore(usageOf(account.id)) + SESSION_LOAD * (recent.get(account.id) ?? 0),
     account.id === preferred ? 0 : 1,
     account.kind === "main" ? 0 : 1,
     Date.parse(account.createdAt) || 0,
@@ -63,11 +74,6 @@ export interface RouteInput {
   now: number;
   autoSwitch: boolean;
   balanceNewAgents: boolean;
-  /**
-   * Whether an existing conversation can open on a different account. When it can't (Codex), a
-   * thread stays on the account it started on, and only brand-new agents are balanced or rerouted.
-   */
-  portable: boolean;
   usageOf(accountId: string): Usage | null | undefined;
 }
 
@@ -82,9 +88,8 @@ export interface RouteDecision {
 /**
  * Which account a session opens on: the agent's own binding, else (for balanced new agents) the
  * roomiest account, else the default. An exhausted or signed-out choice is swapped for the roomiest
- * usable account when automatic switching is on — for new agents always, and for existing ones
- * only when their conversation can move between accounts. A disabled choice is always swapped,
- * and the agent keeps its own binding so it returns once the account is enabled again.
+ * usable account when automatic switching is on. A disabled choice is always swapped, and the agent
+ * keeps its own binding so it returns once the account is enabled again.
  */
 export function chooseAccount(state: StoredState, input: RouteInput): RouteDecision | null {
   const accounts = accountsOf(state, input.family);
@@ -101,39 +106,20 @@ export function chooseAccount(state: StoredState, input: RouteInput): RouteDecis
     account = mostAvailable(state, input.family, input.usageOf, input.now);
     if (account) bind = { accountId: account.id, source: "balance", at };
   }
-  if (!account) {
-    // An imported Codex thread most likely came from the user's own CLI, so it belongs to that login.
-    const imported = !input.portable && input.reason === "import" ? mainAccount(state, input.family) : undefined;
-    account = imported ?? defaultAccount(state, input.family);
-    // A thread that can't move is pinned to the account it first opened on.
-    if (account && !input.portable) bind = { accountId: account.id, source: "thread", at };
-  }
+  account ??= defaultAccount(state, input.family);
   if (!account) return null;
 
   let skipped: RouteDecision["skipped"] = null;
   const why = !account.signedIn ? "signed_out" : account.disabled ? "disabled" : isLimited(account, input.now) ? "limited" : null;
-  const mayMove = fresh || input.portable;
-  if (why && mayMove && (input.autoSwitch || why !== "limited")) {
+  if (why && (input.autoSwitch || why !== "limited")) {
     const alternative = mostAvailable(state, input.family, input.usageOf, input.now, new Set([account.id]));
     if (alternative) {
       skipped = { account, why };
       account = alternative;
-      // A thread that can't move lives where it starts. Otherwise a disabled account keeps its
-      // agents' bindings, so they return when it's enabled again; a limit re-pins them.
-      bind =
-        !input.portable
-          ? { accountId: alternative.id, source: "thread", at }
-          : why === "disabled"
-            ? null
-            : { accountId: alternative.id, source: "auto", at };
+      // A disabled account keeps its agents' bindings, so they return when it's enabled again; a
+      // limit re-pins them.
+      bind = why === "disabled" ? null : { accountId: alternative.id, source: "auto", at };
     }
   }
   return { account, bind, skipped };
-}
-
-/** The account an agent is routed to right now, without side effects (for display). */
-export function effectiveAccountId(state: StoredState, agentId: string, family: Family): string | undefined {
-  const bound = findAccount(state, state.bindings[agentId]?.accountId);
-  if (bound && bound.family === family) return bound.id;
-  return defaultAccount(state, family)?.id;
 }

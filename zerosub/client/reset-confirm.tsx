@@ -1,6 +1,5 @@
-import type { PluginButtonContentProps, PluginHostProps } from "@getpaseo/plugin/client";
-import { useToast } from "@getpaseo/plugin/client/react-native";
-import { useCallback, useState, type ComponentType } from "react";
+import type { PluginHostProps } from "@getpaseo/plugin/client";
+import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import type { AccountView, ResetOffer } from "../shared/model";
 import { redeemReset, type RedeemResult } from "../shared/rpc";
@@ -34,7 +33,7 @@ export function resetBadge(resets: ResetOffer): string {
 
 /**
  * Confirmation for spending a banked reset. A reset is scarce and can't be undone, so the user
- * always confirms it here, whether they came from the account card or an agent's account button.
+ * always confirms it here, on the account card.
  */
 export function ResetConfirm({
   theme,
@@ -102,32 +101,6 @@ export function ResetConfirm({
       </View>
     </View>
   );
-}
-
-/** The confirmation as popover content for an agent's account button. */
-export function resetPopover(store: ZeroSubStore, account: AccountView, agentId: string): ComponentType<PluginButtonContentProps> {
-  return function ResetPopover({ theme, close }: PluginButtonContentProps) {
-    const toast = useToast();
-    const text = useText(theme);
-    return (
-      <View style={{ gap: 12, maxWidth: 360 }}>
-        <Text style={text.heading}>Use a banked reset?</Text>
-        <ResetConfirm
-          theme={theme}
-          store={store}
-          account={account}
-          agentId={agentId}
-          onCancel={close}
-          onFinished={(result) => {
-            close();
-            const { message, variant } = redeemToast(account.label, result);
-            if (variant === "error") toast.error(message);
-            else toast.show(message, { variant, durationMs: 5_000 });
-          }}
-        />
-      </View>
-    );
-  };
 }
 
 /** Toast wording and tone for a redeem result. */

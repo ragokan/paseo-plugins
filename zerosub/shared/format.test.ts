@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountSubtitle, formatAge, formatPlan, formatResetIn, peakUsage, shortLabel, usageSummary } from "./format";
+import { accountSubtitle, formatAge, formatPlan, formatResetIn, peakUsage, usageSummary } from "./format";
 import type { AccountView } from "./model";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -78,10 +78,9 @@ describe("account presentation", () => {
     );
   });
 
-  it("names plans and trims long labels", () => {
+  it("names plans", () => {
     expect(formatPlan("prolite")).toBe("Pro Lite");
     expect(formatPlan("max")).toBe("Max");
     expect(formatPlan("something_new")).toBe("Something_new");
-    expect(shortLabel({ label: "lovelace@analytical.example" })).toBe("lovelace@analytic…");
   });
 });

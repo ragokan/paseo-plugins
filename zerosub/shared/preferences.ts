@@ -19,20 +19,13 @@ export const preferences = defineSettings({
      * When the default account changes, open agents that follow it move to the new one. Off, each
      * stays pinned to the account it runs on (so it stays there when it next opens too), unless that
      * account can't be used right now, and the new default is for new agents and ones that aren't
-     * open at the time. Codex threads never move either way.
+     * open at the time.
      */
     moveAgentsOnDefaultChange: z.boolean().default(true),
     /** New agents start on the account with the most headroom instead of the default. */
     balanceNewAgents: z.boolean().default(false),
     /** When every account of a provider is at its limit, spend a banked reset instead of stopping. */
     autoRedeem: z.boolean().default(false),
-    /**
-     * When every account of a provider is at its limit, carry the chat on in a new agent on the
-     * other provider (Claude ↔ ChatGPT), in a mode no more permissive than the original's.
-     */
-    forkOtherProvider: z.boolean().default(false),
-    /** Show the account pill in the composer of Claude and Codex agents. */
-    showComposerPill: z.boolean().default(true),
     /**
      * Hosts that share usage readings, in order, by host name or server ID; this host among them.
      * Before reading an account itself, a host takes a recent reading from the ones before it.

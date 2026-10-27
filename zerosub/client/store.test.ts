@@ -7,12 +7,10 @@ import { VISIBLE_POLL_MS, createZeroSubStore, type StoreSnapshot } from "./store
 function view(overrides: Partial<StateView> = {}): StateView {
   return {
     accounts: [],
-    agents: [],
     logins: [],
     providers: {},
     canReopen: false,
     browserSignIn: true,
-    showComposerPill: false,
     warnings: [],
     ...overrides,
   };

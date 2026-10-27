@@ -91,7 +91,7 @@ export function PreferencesScreen({ theme, host, onOpenAccounts }: PluginSurface
           />
         </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="New agents and composer">
+      <SettingsSection title="New agents and resets">
         <SettingsCard>
           <SettingsSwitch
             label="Spread new agents across accounts"
@@ -106,20 +106,6 @@ export function PreferencesScreen({ theme, host, onOpenAccounts }: PluginSurface
             value={settings.values.autoRedeem}
             disabled={settings.saving || !settings.values.autoSwitch}
             onValueChange={(autoRedeem) => save({ autoRedeem })}
-          />
-          <SettingsSwitch
-            label="When every account is out, fork the chat to the other provider"
-            hint="A stopped Claude chat carries on in a new ChatGPT agent, or the other way round, with the conversation so far and no more permissions than the original. The original stays as it was."
-            value={settings.values.forkOtherProvider}
-            disabled={settings.saving || !settings.values.autoSwitch}
-            onValueChange={(forkOtherProvider) => save({ forkOtherProvider })}
-          />
-          <SettingsSwitch
-            label="Show the account pill in the composer"
-            hint="Appears on Claude and Codex agents once a provider has two or more accounts."
-            value={settings.values.showComposerPill}
-            disabled={settings.saving}
-            onValueChange={(showComposerPill) => save({ showComposerPill })}
           />
         </SettingsCard>
       </SettingsSection>

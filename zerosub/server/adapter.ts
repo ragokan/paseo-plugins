@@ -76,8 +76,6 @@ export type EnvPatch = Record<string, string | null>;
 /** Everything provider-specific. The service only talks to accounts through this. */
 export interface FamilyAdapter {
   readonly family: Family;
-  /** A live conversation can reopen on another account of this provider. */
-  readonly portable: boolean;
   /** Shortest gap between usage checks for one account, even when a refresh is forced. */
   readonly usageSpacingMs: number;
   available(): Promise<{ ok: boolean; detail: string | null }>;

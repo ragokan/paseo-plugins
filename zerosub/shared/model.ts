@@ -77,24 +77,6 @@ export const AccountViewSchema = z.object({
 });
 export type AccountView = z.infer<typeof AccountViewSchema>;
 
-export const AgentRouteSchema = z.object({
-  agentId: z.string(),
-  family: FamilySchema,
-  /** Account the agent uses now, or will use when its session next opens. */
-  accountId: z.string(),
-  /** Chosen for this agent explicitly (by the user or an automatic switch) rather than following the default. */
-  pinned: z.boolean(),
-  /** The live session still runs on a different account and is waiting to be reopened. */
-  pendingAccountId: z.string().nullable(),
-  /**
-   * The conversation can move to another account in place. False for Codex agents that already
-   * have history: ChatGPT accounts can't read each other's encrypted reasoning, so switching
-   * continues the work in a new agent instead.
-   */
-  movable: z.boolean(),
-});
-export type AgentRoute = z.infer<typeof AgentRouteSchema>;
-
 export const LoginStepSchema = z.enum([
   "starting",
   /** Waiting for the user to finish on the sign-in page (and paste a code, if using `codeUrl`). */
@@ -134,7 +116,6 @@ export type LoginView = z.infer<typeof LoginViewSchema>;
 
 export const StateViewSchema = z.object({
   accounts: z.array(AccountViewSchema),
-  agents: z.array(AgentRouteSchema),
   logins: z.array(LoginViewSchema),
   /** Paseo provider IDs (including custom profiles) that route through each family. */
   providers: z.record(z.string(), FamilySchema),
@@ -145,7 +126,6 @@ export const StateViewSchema = z.object({
    * and daemons started over SSH, where only the code sign-in works.
    */
   browserSignIn: z.boolean().default(true),
-  showComposerPill: z.boolean(),
   warnings: z.array(z.string()),
 });
 export type StateView = z.infer<typeof StateViewSchema>;

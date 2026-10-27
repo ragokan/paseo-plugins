@@ -74,8 +74,8 @@ export function AccountsSurface(props: PluginSurfaceProps & { store: ZeroSubStor
             ) : null}
           </View>
           <Text style={text.muted}>
-            Keep several Claude and ChatGPT accounts signed in. Each agent uses one; when an account
-            hits its limit, agents move to another and keep going.
+            Keep several Claude accounts signed in, beside your ChatGPT (Codex) CLI login. Each agent
+            uses one; when a Claude account hits its limit, agents move to another and keep going.
           </Text>
         </View>
 
@@ -196,15 +196,18 @@ function FamilySection({
         <Text style={text.heading} accessibilityRole="header">
           {family === "claude" ? "Claude" : "ChatGPT (Codex)"}
         </Text>
-        <Button
-          theme={theme}
-          icon="Plus"
-          label={compact ? "Add" : "Add account"}
-          accessibilityLabel={`Add ${FAMILY_LABEL[family]} account`}
-          tooltip={`Sign in another ${FAMILY_LABEL[family]} account`}
-          tooltipAlign="end"
-          onPress={onAdd}
-        />
+        {/* A Codex thread can't move between ChatGPT accounts, so ZeroSub keeps only the CLI's own login. */}
+        {family === "claude" ? (
+          <Button
+            theme={theme}
+            icon="Plus"
+            label={compact ? "Add" : "Add account"}
+            accessibilityLabel={`Add ${FAMILY_LABEL[family]} account`}
+            tooltip={`Sign in another ${FAMILY_LABEL[family]} account`}
+            tooltipAlign="end"
+            onPress={onAdd}
+          />
+        ) : null}
       </View>
       {accounts.length === 0 ? (
         <Text style={text.muted}>No {FAMILY_LABEL[family]} accounts yet.</Text>
@@ -261,12 +264,7 @@ function AccountCard({
     setBusy("toggle");
     try {
       const result = await store.rpc(setAccountEnabled, { accountId: account.id, enabled: enabling });
-      const message = describeReopen(`${account.label} is ${enabling ? "enabled" : "disabled"}`, result);
-      const stayed =
-        result.stayed > 0
-          ? ` · ${result.stayed} ChatGPT conversation${result.stayed === 1 ? " stays" : "s stay"} on it (they can't change accounts)`
-          : "";
-      toast.show(`${message}${stayed}`, { variant: "success", durationMs: 5_000 });
+      toast.show(describeReopen(`${account.label} is ${enabling ? "enabled" : "disabled"}`, result), { variant: "success", durationMs: 5_000 });
     } catch (error) {
       toast.error(describe(error));
     } finally {
@@ -485,9 +483,8 @@ function AccountCard({
       <Modal title={`Remove ${account.label}?`} open={confirmRemove} onOpenChange={setConfirmRemove}>
         <Modal.Content>
           <Text style={text.body}>
-            {account.family === "claude"
-              ? "This signs the account out on this machine and deletes its saved login. Agents using it move to the default account; their conversations are kept."
-              : "This signs the account out on this machine and deletes its saved login. New agents use the default account. Existing ChatGPT conversations on it can't move, so start new agents for them."}
+            This signs the account out on this machine and deletes its saved login. Agents using it move to the default account;
+            their conversations are kept.
           </Text>
           <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end" }}>
             <Button theme={theme} label="Cancel" tooltip="Keep this account" tooltipAlign="end" onPress={() => setConfirmRemove(false)} />
@@ -653,13 +650,6 @@ function AutomationSettings({ theme }: { theme: Theme }) {
           disabled={settings.saving || !settings.values.autoSwitch}
           onValueChange={(autoRedeem) => save({ autoRedeem })}
         />
-        <SettingsSwitch
-          label="When every account is out, fork the chat to the other provider"
-          hint="A stopped Claude chat carries on in a new ChatGPT agent, or the other way round, with the conversation so far. The new agent gets no more permissions than the original; the original stays as it was."
-          value={settings.values.forkOtherProvider}
-          disabled={settings.saving || !settings.values.autoSwitch}
-          onValueChange={(forkOtherProvider) => save({ forkOtherProvider })}
-        />
       </SettingsCard>
       {settings.saveError ? <Text style={text.danger}>{settings.saveError}</Text> : null}
     </View>
@@ -668,7 +658,6 @@ function AutomationSettings({ theme }: { theme: Theme }) {
 
 export function describeReopen(prefix: string, summary: ReopenSummary): string {
   const parts = [prefix];
-  if (summary.continuedIn) parts.push(`continuing in “${summary.continuedIn.title}”`);
   if (summary.reopened.length > 0) parts.push(`${summary.reopened.length} agent(s) switched`);
   if (summary.deferred.length > 0) parts.push(`${summary.deferred.length} will switch after their current turn`);
   if (summary.failed.length > 0) parts.push(`${summary.failed.length} will switch on their next restart`);

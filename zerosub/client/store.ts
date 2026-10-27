@@ -16,7 +16,7 @@ export interface StoreSnapshot {
 }
 
 /**
- * One poller per installation feeds the surface, composer pills and commands.
+ * One poller per installation feeds the surface and commands.
  * Polling is cheap: the daemon answers from memory and refreshes usage on its own schedule.
  */
 export interface ZeroSubStore {

@@ -44,7 +44,7 @@ export function describeRow(row: SwitchRow): string {
     const reset = formatResetIn(row.resetsAt);
     return `Every ${FAMILY_LABEL[row.family]} account is at its limit${
       reset ? `; ${row.from ?? "this one"} resets ${reset}` : ""
-    }. Add another account, use a banked reset from the account button, or wait.${row.detail ? ` ${row.detail}` : ""}`;
+    }. Add another account, use a banked reset from Accounts (ZeroSub), or wait.${row.detail ? ` ${row.detail}` : ""}`;
   }
   if (row.outcome === "reset") {
     return `${row.from ?? "This account"} hit its usage limit, so a banked reset was used. ${row.detail ?? "Limits reset."}${

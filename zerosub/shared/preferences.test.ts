@@ -18,6 +18,8 @@ describe("preferences", () => {
     const saved = shipped.parse({ autoSwitch: false });
     expect(preferences.schema.parse(saved)).toMatchObject({ autoSwitch: false, moveAgentsOnDefaultChange: true });
     expect(preferences.schema.parse({}).moveAgentsOnDefaultChange).toBe(true);
+    // Switches that are gone since (fork to the other provider, the composer pill) don't stop it loading.
+    expect(preferences.schema.safeParse({ ...saved, forkOtherProvider: true, showComposerPill: false }).success).toBe(true);
   });
 
   it("can still be read by 1.2.2 after a downgrade", () => {

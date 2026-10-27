@@ -54,7 +54,6 @@ const OVERRIDING_AUTH = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANT
 
 export class ClaudeAdapter implements FamilyAdapter {
   readonly family = "claude" as const;
-  readonly portable = true;
   /** Anthropic's usage endpoint answers 429 to rapid repeats. */
   readonly usageSpacingMs = 90_000;
   private readonly renewing = new Map<string, Promise<Credentials | null>>();

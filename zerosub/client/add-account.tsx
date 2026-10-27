@@ -136,7 +136,7 @@ export function AddAccountModal({
         <Text style={text.heading}>You're signed in</Text>
         <Text style={text.body}>
           {who} is ready. New {FAMILY_LABEL[family]} agents{multiHost ? ` on ${host.label}` : ""} can use it, and you can
-          move an agent to it from the account button in the message box.
+          move an agent to it with /account.
         </Text>
         <Row>
           <Button theme={theme} tone="primary" label="Done" tooltip="Close this window" tooltipAlign="end" onPress={onClose} />

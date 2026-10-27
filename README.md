@@ -14,7 +14,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
 | [run-it](run-it) | Type `/sh` and a command to run it as you in the agent's folder, with live output in the chat, and run the commands an agent hands you from a card or the run pill. A copy of Steve Castaneda's Shell Yeah. |
-| [zerosub](zerosub) | Several Claude and ChatGPT (Codex) subscriptions side by side: pick an account per agent, and move to another when one hits its limit. A copy of Kapybara's ZeroSub with its Paseo 0.13 fix. |
+| [zerosub](zerosub) | Several Claude subscriptions side by side, beside your ChatGPT (Codex) login: pick an account per agent, and move to another when one hits its limit. Every account in Paseo's usage display, with readings shared across hosts. A trimmed copy of Kapybara's ZeroSub with its Paseo 0.13 fix. |
 | [agent-titles](agent-titles) | Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
 | [all](all) | All of the above but ZeroSub in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |

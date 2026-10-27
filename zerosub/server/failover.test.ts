@@ -38,7 +38,6 @@ function claudeAdapter(hit: () => LimitHit): FamilyAdapter {
   const reading = (): UsageRead => ({ fetchedAt: new Date().toISOString(), windows: [], error: null, cached: false, resets: null });
   return {
     family: "claude",
-    portable: true,
     usageSpacingMs: 0,
     available: async () => ({ ok: true, detail: null }),
     prepareHome: async () => undefined,
@@ -401,139 +400,6 @@ describe("failover", () => {
   });
 });
 
-describe("forking to the other provider", () => {
-  const CODEX_MAIN = MAIN_ACCOUNT_ID.codex;
-  const MODES: Record<string, Array<{ id: string; label: string; colorTier: string }>> = {
-    claude: [
-      { id: "plan", label: "Plan Mode", colorTier: "planning" },
-      { id: "default", label: "Always Ask", colorTier: "safe" },
-      { id: "acceptEdits", label: "Accept File Edits", colorTier: "moderate" },
-      { id: "bypassPermissions", label: "Bypass", colorTier: "dangerous" },
-    ],
-    codex: [
-      { id: "auto", label: "Default Permissions", colorTier: "moderate" },
-      { id: "full-access", label: "Full Access", colorTier: "dangerous" },
-    ],
-  };
-
-  /** `conversation` is the agent's timeline, which Paseo pages from its tail. */
-  async function setUpFork(modeId: string, conversation: readonly Row[] = []) {
-    const store = new StateStore(join(root, "state.json"));
-    await store.update((draft) =>
-      Object.assign(draft, {
-        accounts: [account(MAIN, "marketing", "main"), { ...account(CODEX_MAIN, "hello", "main"), family: "codex" }],
-        defaults: { claude: MAIN, codex: CODEX_MAIN },
-      }),
-    );
-    const source = {
-      id: AGENT,
-      provider: "claude",
-      status: "idle",
-      title: "Fix the build",
-      model: "claude-opus-5-5",
-      currentModeId: modeId,
-      workspaceId: "ws-1",
-      archivedAt: null,
-      lastUserMessageAt: "2026-09-23T07:00:00.000Z",
-      labels: {},
-    };
-    const agents: Array<Record<string, unknown>> = [source];
-    const created: Array<{ agentId: string; config: { provider: string; modeId?: string }; title: string; prompt: string; labels: Record<string, string> }> = [];
-    const notes: Array<{ to: string; outcome: string; toFamily: string | null; detail: string | null; continuedIn: { agentId: string } | null }> = [];
-    const paseo = {
-      config: { get: async () => ({ config: { providers: {} } }) },
-      providers: {
-        listAvailable: async () => ({ providers: [{ provider: "claude", available: true }, { provider: "codex", available: true }] }),
-        listModes: async (provider: string) => ({ modes: MODES[provider] }),
-        listModels: async (provider: string) => ({ models: [{ id: provider === "codex" ? "gpt-5.6-sol" : "claude-opus-5-5", isDefault: true }] }),
-      },
-      workspaces: {
-        ref: () => ({
-          agents: {
-            create: async (request: (typeof created)[number]) => {
-              created.push(request);
-              agents.push({ id: request.agentId, provider: "codex", status: "running", title: request.title, archivedAt: null, labels: request.labels });
-            },
-          },
-        }),
-      },
-      agents: {
-        list: async () => ({ entries: agents.map((agent) => ({ agent })), pageInfo: { hasMore: false, nextCursor: null } }),
-        ref: () => ({
-          refresh: async () => ({ agent: source }),
-          send: async () => undefined,
-          timeline: {
-            append: async (item: { data: (typeof notes)[number] }) => void notes.push(item.data),
-            refetch: async ({ limit = 0 }: { limit?: number } = {}) => ({ entries: limit > 0 ? conversation.slice(-limit) : conversation }),
-          },
-        }),
-      },
-    };
-    const service = new Service(
-      {
-        claude: claudeAdapter(() => ({ kind: "window", resetsAt: inFuture(), message: "You've hit your session limit" })),
-        codex: { ...claudeAdapter(() => ({ kind: "window", resetsAt: null, message: "" })), family: "codex", portable: false } as FamilyAdapter,
-      },
-      store,
-      { resolve: async () => ({ claude: "claude" as const, codex: "codex" as const }) } as unknown as FamilyResolver,
-      { locate: async () => "/usr/local/bin/paseo", reopen: async () => ({ ok: true as const }) } as unknown as Reopener,
-    );
-    service.setPreferences(preferences.schema.parse({ forkOtherProvider: true }));
-    const context = { paseo } as never;
-    const limitTurn = () =>
-      service.onTurnEnded(
-        { agent: { id: AGENT, provider: "claude" }, turnId: "t", outcome: { kind: "failed", error: { message: "limit" } }, timeline: [] } as never,
-        context,
-      );
-    return { store, created, notes, limitTurn };
-  }
-
-  it("carries the work on with the other provider, at the same permission level", async () => {
-    const { store, created, notes, limitTurn } = await setUpFork("bypassPermissions");
-    await limitTurn();
-    expect(created).toHaveLength(1);
-    const fork = created[0];
-    expect(fork?.config).toEqual({ provider: "codex/gpt-5.6-sol", modeId: "full-access" });
-    expect(fork?.title).toBe("Fix the build (continued on ChatGPT)");
-    expect(fork?.labels).toEqual({ "zerosub.continued-from": AGENT });
-    expect(fork?.prompt).toMatch(/earlier Claude Code session that stopped because every Claude account reached its usage limit/);
-    expect((await store.read()).bindings[fork?.agentId ?? ""]).toMatchObject({ accountId: CODEX_MAIN, source: "thread" });
-    expect(notes.at(-1)).toMatchObject({ outcome: "continued", toFamily: "codex", to: "hello", continuedIn: { agentId: fork?.agentId } });
-  });
-
-  it("points at the earlier fork instead of starting another", async () => {
-    const { created, notes, limitTurn } = await setUpFork("bypassPermissions");
-    await limitTurn();
-    await limitTurn();
-    expect(created).toHaveLength(1);
-    expect(notes.at(-1)).toMatchObject({ outcome: "continued", continuedIn: { agentId: created[0]?.agentId } });
-  });
-
-  it("won't fork into a mode more permissive than the original's", async () => {
-    const { created, notes, limitTurn } = await setUpFork("default");
-    await limitTurn();
-    expect(created).toHaveLength(0);
-    expect(notes.at(-1)).toMatchObject({ outcome: "stayed" });
-    expect(notes.at(-1)?.detail).toMatch(/no mode as careful as this agent's \(“Always Ask”\)/);
-  });
-
-  it("hands the fork the whole conversation when the hook sends none", async () => {
-    // Paseo 0.13 sends turn-ended hooks no timeline. The fork pages the conversation itself instead
-    // of taking the rows the limit was read from, so it still gets the request from 48 rows back.
-    const steps = Array.from({ length: 45 }, (_, step): AgentTimelineItem => ({ type: "assistant_message", text: `Step ${step + 1} done.` }));
-    const conversation = [
-      ...inTurn("t0", { type: "user_message", text: "Fix the build" }, ...steps),
-      ...inTurn("t", { type: "user_message", text: "Now run the linter" }, { type: "assistant_message", text: "You've hit your session limit · resets 3pm (UTC)" }),
-    ];
-    const { created, limitTurn } = await setUpFork("bypassPermissions", conversation);
-    await limitTurn();
-    const prompt = created[0]?.prompt ?? "";
-    expect(prompt.match(/User: Fix the build/g) ?? []).toHaveLength(1);
-    expect(prompt).toContain("Step 45 done.");
-    expect(prompt).toContain("User: Now run the linter");
-  });
-});
-
 describe("disabling an account", () => {
   it("moves its agents off and back, and won't disable the last usable account", async () => {
     const { service, store, reopened } = await setUp(
@@ -608,14 +474,14 @@ describe("changing the default account", () => {
   const WORK = "claude-work";
   const CODEX_MAIN = MAIN_ACCOUNT_ID.codex;
   const KEEP = preferences.schema.parse({ moveAgentsOnDefaultChange: false });
-  const NOTHING_MOVED = { reopened: [], deferred: [], failed: [], continuedIn: null };
+  const NOTHING_MOVED = { reopened: [], deferred: [], failed: [] };
   const session = (accountId: string) => ({ accountId, family: "claude" as const, openedAt });
 
   /** Several agents, each answering for itself. `reopened` lists the ones Paseo was asked to reload. */
   async function setUpAgents(
     state: Partial<StoredState>,
     listed: Array<{ id: string; status: string; provider?: string; archived?: boolean }>,
-    options: { claude?: Partial<FamilyAdapter>; onList?: (service: Service, context: never) => void } = {},
+    options: { claude?: Partial<FamilyAdapter>; onList?: (service: Service, context: never) => void; recent?: readonly Row[] } = {},
   ) {
     const store = new StateStore(join(root, "state.json"));
     await store.update((draft) => Object.assign(draft, state));
@@ -636,7 +502,7 @@ describe("changing the default account", () => {
         ref: (id: string) => ({
           refresh: async () => ({ agent: agents.find((agent) => agent.id === id) }),
           send: async () => undefined,
-          timeline: { append: async () => undefined, refetch: async () => ({ entries: [] }) },
+          timeline: { append: async () => undefined, refetch: async () => ({ entries: options.recent ?? [] }) },
         }),
       },
     };
@@ -644,7 +510,7 @@ describe("changing the default account", () => {
     const reopened: string[] = [];
     const hit = (): LimitHit => ({ kind: "window", resetsAt: inFuture(), message: "You've hit your session limit" });
     const service: Service = new Service(
-      { claude: { ...claudeAdapter(hit), ...options.claude }, codex: { ...claudeAdapter(hit), family: "codex", portable: false } as FamilyAdapter },
+      { claude: { ...claudeAdapter(hit), ...options.claude }, codex: { ...claudeAdapter(hit), family: "codex" } as FamilyAdapter },
       store,
       { resolve: async () => ({ claude: "claude" as const, codex: "codex" as const }) } as unknown as FamilyResolver,
       {
@@ -698,12 +564,6 @@ describe("changing the default account", () => {
     expect(bindings.closed).toBeUndefined();
     expect(bindings.there).toBeUndefined();
     expect(bindings.chatgpt).toBeUndefined();
-
-    // Kept agents read as pinned, so their account button offers "Follow default"; the rest follow it.
-    const routes = new Map((await service.view(paseo)).agents.map((route) => [route.agentId, route]));
-    expect(routes.get("idle")).toMatchObject({ accountId: WORK, pinned: true, pendingAccountId: null });
-    expect(routes.get("closed")).toMatchObject({ accountId: HELLO, pinned: false });
-    expect(routes.get("there")).toMatchObject({ accountId: HELLO, pinned: false });
   });
 
   it("moves an agent whose account it can't stay on, as it would with the switch on", async () => {
@@ -867,6 +727,35 @@ describe("changing the default account", () => {
     expect(reopened).toEqual([]);
   });
 
+  it("moves agents spread across accounts or moved off a limit, but not ones picked by hand", async () => {
+    const { service, store, paseo, reopened } = await setUpAgents(
+      {
+        accounts: [account(MAIN, "marketing", "main"), account(HELLO, "hello", "managed")] as never,
+        defaults: { claude: MAIN, codex: null },
+        bindings: {
+          spread: { accountId: MAIN, source: "balance", at: openedAt },
+          moved: { accountId: MAIN, source: "auto", at: openedAt },
+          chosen: { accountId: MAIN, source: "user", at: openedAt },
+        },
+        sessions: { spread: session(MAIN), moved: session(MAIN), chosen: session(MAIN) },
+      },
+      [
+        { id: "spread", status: "idle" },
+        { id: "moved", status: "idle" },
+        { id: "chosen", status: "idle" },
+      ],
+    );
+    service.setPreferences(preferences.schema.parse({ balanceNewAgents: true }));
+
+    const summary = await service.setDefault(paseo, HELLO);
+    expect(summary.reopened.toSorted()).toEqual(["moved", "spread"]);
+    expect(reopened.toSorted()).toEqual(["moved", "spread"]);
+    const state = await store.read();
+    expect(state.sessions.spread?.accountId).toBe(HELLO);
+    expect(state.sessions.chosen?.accountId).toBe(MAIN);
+    expect(state.bindings.chosen).toMatchObject({ accountId: MAIN, source: "user" });
+  });
+
   it("still moves a kept agent when its account hits a limit", async () => {
     const { service, store, reopened, notes, limitTurn } = await setUp(stateWithLiveAgent(), () => ({
       kind: "window",
@@ -899,25 +788,6 @@ describe("changing the default account", () => {
     expect(reopened).toEqual([AGENT]);
   });
 
-  it("pins ChatGPT threads as before, since they can't move either way", async () => {
-    const codex = (id: string, label: string, kind: "main" | "managed") => ({ ...account(id, label, kind), family: "codex" });
-    const { service, store, paseo, reopened } = await setUpAgents(
-      {
-        accounts: [codex(CODEX_MAIN, "chatgpt", "main"), codex("codex-work", "work", "managed")] as never,
-        defaults: { claude: null, codex: CODEX_MAIN },
-        sessions: { thread: { accountId: CODEX_MAIN, family: "codex", openedAt } },
-      },
-      [
-        { id: "thread", status: "idle", provider: "codex" },
-        { id: "archived", status: "closed", provider: "codex", archived: true },
-      ],
-    );
-    await service.setDefault(paseo, "codex-work");
-    const { bindings } = await store.read();
-    expect(bindings.thread).toMatchObject({ accountId: CODEX_MAIN, source: "thread" });
-    expect(bindings.archived).toMatchObject({ accountId: CODEX_MAIN, source: "thread" });
-    expect(reopened).toEqual([]);
-  });
 });
 
 describe("picking an account by hand", () => {
@@ -938,13 +808,95 @@ describe("picking an account by hand", () => {
       },
       () => ({ kind: "window", resetsAt: inFuture(), message: "" }),
     );
-    const [route] = (await service.view(paseo as never)).agents;
-    expect(route).toMatchObject({ agentId: AGENT, accountId: MAIN, pendingAccountId: DEVELOPMENT });
+    expect((await service.view(paseo as never)).accounts.find((entry) => entry.id === MAIN)?.agentCount).toBe(1);
 
     await service.setAgentAccount(paseo as never, AGENT, MAIN);
     const state = await store.read();
     expect(state.bindings[AGENT]).toMatchObject({ accountId: MAIN, source: "user" });
     expect(state.sessions[AGENT]?.accountId).toBe(MAIN);
     expect(reopened).toEqual([AGENT]);
+  });
+});
+
+describe("moving idle agents off a spent account", () => {
+  const WORK = "claude-work";
+  const openedAt = "2026-09-23T07:00:00.000Z";
+  const session = (accountId: string) => ({ accountId, family: "claude" as const, openedAt });
+
+  /** Agents on work, beside the CLI login; `usage` is what Anthropic says about each home. */
+  async function setUpIdle(listed: string[], options: { usage?: (home: string | null) => UsageRead; recent?: readonly Row[] } = {}) {
+    const store = new StateStore(join(root, "state.json"));
+    await store.update((draft) =>
+      Object.assign(draft, {
+        accounts: [account(WORK, "work", "managed"), account(MAIN, "marketing", "main")],
+        defaults: { claude: WORK, codex: null },
+        sessions: Object.fromEntries(listed.map((id) => [id, session(WORK)])),
+      }),
+    );
+    const agents = listed.map((id) => ({ id, provider: "claude", status: "idle", archivedAt: null, lastUserMessageAt: openedAt }));
+    const paseo = {
+      config: { get: async () => ({ config: { providers: {} } }) },
+      agents: {
+        list: async () => ({ entries: agents.map((agent) => ({ agent })), pageInfo: { hasMore: false, nextCursor: null } }),
+        ref: (id: string) => ({
+          refresh: async () => ({ agent: agents.find((agent) => agent.id === id) }),
+          send: async () => undefined,
+          timeline: { append: async () => undefined, refetch: async () => ({ entries: options.recent ?? [] }) },
+        }),
+      },
+    };
+    const context = { paseo } as never;
+    const reopened: string[] = [];
+    const hit = (): LimitHit => ({ kind: "window", resetsAt: inFuture(), message: "You've hit your session limit" });
+    const claude = {
+      ...claudeAdapter(hit),
+      // A turn that failed, or whose timeline holds anything, ended on a limit.
+      detectLimit: (event: { outcome: { kind: string }; timeline: readonly unknown[] }) =>
+        event.outcome.kind === "failed" || event.timeline.length > 0 ? hit() : null,
+      ...(options.usage ? { usage: async (home: string | null) => options.usage!(home) } : {}),
+    };
+    const service: Service = new Service(
+      { claude: claude as FamilyAdapter, codex: claudeAdapter(hit) },
+      store,
+      { resolve: async () => ({ claude: "claude" as const }) } as unknown as FamilyResolver,
+      {
+        locate: async () => "/usr/local/bin/paseo",
+        reopen: async (id: string) => {
+          reopened.push(id);
+          await service.onSessionOpen({ agentId: id, provider: "claude", reason: "refresh", purpose: "interactive", env: {} } as never, context);
+          return { ok: true as const };
+        },
+      } as unknown as Reopener,
+    );
+    service.attach(paseo as never);
+    return { service, store, context, reopened };
+  }
+
+  it("moves them when a usage reading shows the account full", async () => {
+    const reading = (home: string | null): UsageRead => ({
+      fetchedAt: new Date().toISOString(),
+      windows: [{ id: "five_hour", label: "5-hour", usedPercent: home ? 100 : 20, resetsAt: inFuture() }],
+      error: null,
+      cached: false,
+      resets: null,
+    });
+    const { service, store, reopened } = await setUpIdle(["idle"], { usage: reading });
+    await service.refreshUsage(WORK, true);
+    expect((await store.read()).accounts.find((entry) => entry.id === WORK)?.limitedUntil).toBeTruthy();
+    await vi.waitFor(() => expect(reopened).toEqual(["idle"]));
+    expect((await store.read()).sessions.idle?.accountId).toBe(MAIN);
+  });
+
+  it("moves one a limit stopped earlier, once another agent's limit sends them off", async () => {
+    // "stopped" ended a turn on work's limit long ago, when nothing else had room.
+    const { service, store, context, reopened } = await setUpIdle(["agent", "stopped"], {
+      recent: [{ item: { type: "assistant_message", text: "You've hit your session limit" } as AgentTimelineItem, turnId: "old" }],
+    });
+    await service.onTurnEnded(
+      { agent: { id: "agent", provider: "claude" }, turnId: "t", outcome: { kind: "failed", error: { message: "limit" } }, timeline: [] } as never,
+      context,
+    );
+    await vi.waitFor(() => expect(reopened.toSorted()).toEqual(["agent", "stopped"]));
+    expect((await store.read()).sessions.stopped?.accountId).toBe(MAIN);
   });
 });

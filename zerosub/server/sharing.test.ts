@@ -152,7 +152,7 @@ describe("usage polling with shared readings", () => {
       ] as never;
     });
     const live = vi.fn(async (): Promise<UsageRead> => reading(0, 20));
-    const adapter = { family: "claude", portable: true, usageSpacingMs: 0, usage: live } as unknown as FamilyAdapter;
+    const adapter = { family: "claude", usageSpacingMs: 0, usage: live } as unknown as FamilyAdapter;
     const peers = { reading: vi.fn(async () => shared), setOrder: () => undefined, stop: async () => undefined };
     const service = new Service({ claude: adapter, codex: adapter }, store, undefined, undefined, peers as unknown as Peers);
     return { service, store, live, peers };
