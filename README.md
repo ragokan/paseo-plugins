@@ -4,7 +4,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 
 | Plugin | What it does |
 |---|---|
-| [tweaks](tweaks) | Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, with Mark as done first in the command palette and on ⌘⇧D, show the ones waiting on a subagent as Waiting, give Idle its own icon, show host names without the server icon, put the machine before the folder, gray the Done label, and show Shell Yeah's Run pill as run. |
+| [tweaks](tweaks) | Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, with Mark as done first in the command palette and on ⌘⇧D, show the ones waiting on a subagent as Waiting, give Idle its own icon, show host names without the server icon, put the machine before the folder, and gray the Done label. |
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
@@ -12,10 +12,11 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [machine-status](machine-status) | CPU, memory, disk, processes, ports and Docker for the Linux or macOS machine the daemon runs on, read only while its screen is on screen. |
 | [continue-after-error](continue-after-error) | When the daemon starts, resume the Claude and Codex agents a daemon stop, crash or error cut off, but not the ones you stopped. |
 | [status-labels](status-labels) | Label each workspace by its sidebar status group: Input, Failed, Working, Review, Waiting, Idle or Done. |
+| [run-it](run-it) | Type `/sh` and a command to run it as you in the agent's folder, with live output in the chat, and run the commands an agent hands you from a card or the run pill. A copy of Steve Castaneda's Shell Yeah. |
 | [zerosub](zerosub) | Several Claude and ChatGPT (Codex) subscriptions side by side: pick an account per agent, and move to another when one hits its limit. A copy of Kapybara's ZeroSub with its Paseo 0.13 fix. |
 | [agent-titles](agent-titles) | Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
-| [all](all) | All of the above but ZeroSub in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |
+| [all](all) | All of the above but ZeroSub and run-it in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |
 
 Each folder's `OVERVIEW.md` explains the plugin and its limits.
 

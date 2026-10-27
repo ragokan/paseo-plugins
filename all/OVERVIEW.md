@@ -1,4 +1,4 @@
-Every plugin in this repository but ZeroSub in one install: tweaks, mark-all-read, mcp-toggle, merge-thinking, themes, machine-status, continue-after-error, status-labels, agent-titles and browseros-neo. Each keeps its own behavior and limits, described in its folder's OVERVIEW.md.
+Every plugin in this repository but ZeroSub and run-it in one install: tweaks, mark-all-read, mcp-toggle, merge-thinking, themes, machine-status, continue-after-error, status-labels, agent-titles and browseros-neo. Each keeps its own behavior and limits, described in its folder's OVERVIEW.md.
 
 Install it on every host. The app loads a copy for each host that has it, and the copies share the work:
 

@@ -9,7 +9,7 @@ type Fn = (...args: never[]) => unknown;
 type Wrapper = Fn & { original?: Fn; loads?: number };
 
 /**
- * Replaces a function a module or object holds with wrap(original); callers read it from there on every
+ * Replaces a function a module exports with wrap(original); callers read it from the module on every
  * call. The app loads this plugin once per host that has it, so loads share one wrapper, and the last
  * one to unload puts the original back.
  */
@@ -102,59 +102,6 @@ export function markAsDoneFirst(sections: readonly PaletteSection[]): PaletteSec
   return [...sections];
 }
 
-// Paseo's plugin buttons, as its pluginButtonStore keeps them: header buttons and composer pills.
-interface ButtonEntry {
-  id: string;
-  installation: { id: string };
-  placement: string;
-  button: { label?: string };
-}
-interface ButtonStore {
-  entries: ButtonEntry[];
-  publish(entries: ButtonEntry[]): void;
-}
-
-function isButtonStore(value: unknown): value is ButtonStore {
-  const store = value as Partial<ButtonStore & { addComposerPill: unknown }> | null;
-  return typeof store === "object" && store !== null && Array.isArray(store.entries) && typeof store.publish === "function" && typeof store.addComposerPill === "function";
-}
-
-// Paseo's button for each pill lowercased here, to put back when the tweak comes off.
-const paseoButtons = new WeakMap<object, ButtonEntry["button"]>();
-
-/** Shell Yeah's Run pill as "run", lowercase like the mcp pill beside it. The same array when nothing changes. */
-export function lowercaseRunPill(entries: ButtonEntry[]): ButtonEntry[] {
-  let changed = false;
-  const next = entries.map((entry) => {
-    const label = entry.button.label;
-    if (entry.installation.id !== "shell-yeah" || entry.placement !== "composer" || entry.id !== "run") return entry;
-    if (!label || label === label.toLowerCase()) return entry;
-    changed = true;
-    const button = { ...entry.button, label: label.toLowerCase() };
-    paseoButtons.set(button, entry.button);
-    return { ...entry, button };
-  });
-  return changed ? next : entries;
-}
-
-/** The pills with Paseo's labels again. */
-export function restoreRunPill(entries: ButtonEntry[]): ButtonEntry[] {
-  let changed = false;
-  const next = entries.map((entry) => {
-    const button = paseoButtons.get(entry.button);
-    if (!button) return entry;
-    changed = true;
-    return { ...entry, button };
-  });
-  return changed ? next : entries;
-}
-
-// The pills already there: lowercase while publish is wrapped, as Paseo made them once it is not.
-function relabelPills(store: ButtonStore) {
-  const entries = guarded("run pill", store.entries, "original" in store.publish ? lowercaseRunPill : restoreRunPill);
-  if (entries !== store.entries) store.publish(entries);
-}
-
 type SelectMetaRowItems = (input: unknown) => MetaItem[];
 type HostBadge = (props: { badge: { showLabel: boolean } }) => unknown;
 type UseNewWorkspaceForm = (input: unknown) => unknown;
@@ -202,20 +149,6 @@ const TWEAKS = [
       },
     rows: false,
   },
-  {
-    // Shell Yeah's composer pill as "run". Every change to the plugin buttons goes through the store's
-    // publish, so pills added or updated later are lowercased too.
-    find: (exports: Record<string, unknown>) => isButtonStore(exports.pluginButtonStore),
-    target: (exports: Record<string, unknown>) => exports.pluginButtonStore as ButtonStore & Record<string, unknown>,
-    name: "publish",
-    wrap: (original: ButtonStore["publish"]) =>
-      function publish(this: ButtonStore, entries: ButtonEntry[]) {
-        return original.call(this, guarded("run pill", entries, lowercaseRunPill));
-      },
-    rows: false,
-    // Pills added before the plugin started are relabeled as it starts, and given back Paseo's as it stops.
-    refresh: (store: Record<string, unknown>) => relabelPills(store as unknown as ButtonStore),
-  },
 ] as const;
 
 /**
@@ -245,14 +178,7 @@ export function applyTweaks(modules: MetroModules): () => void {
     let rows = false;
     for (const tweak of TWEAKS) {
       if (removers.has(tweak.name) || !tweak.find(exports)) continue;
-      const target = "target" in tweak ? tweak.target(exports) : exports;
-      const unwrap = wrapExport(target, tweak.name, tweak.wrap as unknown as (original: Fn) => Fn);
-      const refresh = "refresh" in tweak ? () => tweak.refresh(target) : () => {};
-      refresh();
-      removers.set(tweak.name, () => {
-        unwrap();
-        refresh();
-      });
+      removers.set(tweak.name, wrapExport(exports, tweak.name, tweak.wrap as unknown as (original: Fn) => Fn));
       rows ||= tweak.rows;
     }
     return rows;

@@ -11,8 +11,8 @@ const repository = path.dirname(root);
 const RUNTIMES = ["client", "server", "shared"];
 const CODE = /\.[cm]?[jt]sx?$/;
 // Installed on their own instead. ZeroSub keeps one account registry per daemon, and a second copy
-// would route every session as well.
-const STANDALONE = new Set(["zerosub"]);
+// would route every session as well. run-it takes Shell Yeah's place, which is installed on its own.
+const STANDALONE = new Set(["zerosub", "run-it"]);
 // Relative specifiers in `from "…"`, `import "…"` and `import("…")`.
 const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*\(?\s*)(["'])(\.{1,2}\/[^"']*)\2/g;
 
