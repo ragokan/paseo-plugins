@@ -919,3 +919,32 @@ describe("changing the default account", () => {
     expect(reopened).toEqual([]);
   });
 });
+
+describe("picking an account by hand", () => {
+  const DEVELOPMENT = "claude-development";
+  const openedAt = "2026-09-23T07:00:00.000Z";
+
+  it("moves an idle agent still on a spent account to the account it's routed to", async () => {
+    // Usage showed development full, so the agent routes elsewhere, but its open session stays put.
+    const { service, store, reopened, paseo } = await setUp(
+      {
+        accounts: [
+          { ...account(DEVELOPMENT, "development", "managed"), limitedUntil: inFuture(), limitKind: "window" },
+          account(MAIN, "okan", "main"),
+        ] as never,
+        defaults: { claude: null, codex: null },
+        bindings: { [AGENT]: { accountId: DEVELOPMENT, source: "balance", at: openedAt } },
+        sessions: { [AGENT]: { accountId: DEVELOPMENT, family: "claude", openedAt } },
+      },
+      () => ({ kind: "window", resetsAt: inFuture(), message: "" }),
+    );
+    const [route] = (await service.view(paseo as never)).agents;
+    expect(route).toMatchObject({ agentId: AGENT, accountId: MAIN, pendingAccountId: DEVELOPMENT });
+
+    await service.setAgentAccount(paseo as never, AGENT, MAIN);
+    const state = await store.read();
+    expect(state.bindings[AGENT]).toMatchObject({ accountId: MAIN, source: "user" });
+    expect(state.sessions[AGENT]?.accountId).toBe(MAIN);
+    expect(reopened).toEqual([AGENT]);
+  });
+});

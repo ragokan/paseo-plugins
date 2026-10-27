@@ -171,12 +171,15 @@ function buttonFor(
 
   // Codex threads can't change accounts in place; continue in this task's tab for that account.
   const movable = route?.movable ?? true;
+  // The session can still be open on another account, say one that hit its limit. A busy agent moves
+  // after its turn, but an idle one has no turn to end, so picking the account it's routed to moves it.
+  const moved = !route?.pendingAccountId;
   const items: PluginButtonMenuEntry[] = accounts.map((account, index) => ({
     kind: "item",
     id: `account-${index}`,
     title: account.id === current.id || movable ? menuTitle(account) : `Continue on ${account.label}`,
     icon: account.id === current.id ? "CircleCheck" : movable ? "Circle" : "ArrowRightLeft",
-    disabled: account.status === "signed_out" || account.status === "disabled" || account.id === current.id,
+    disabled: account.status === "signed_out" || account.status === "disabled" || (account.id === current.id && moved),
     behavior: { kind: "action", onPress: choose(account.id) },
   }));
   // When the agent is stuck on a limit, a way out is the most useful thing in the menu.
