@@ -1,6 +1,8 @@
-<img src="https://raw.githubusercontent.com/stevecastaneda/paseo-plugins/main/shell-yeah/icon.png" alt="" width="64" height="64">
+<img src="icon.png" alt="" width="64" height="64">
 
-# Shell Yeah
+# Run it
+
+This is a copy of [Shell Yeah](https://github.com/stevecastaneda/paseo-plugins/tree/main/shell-yeah) 1.2.3 by Steve Castaneda, under the MIT license, installed as `run-it`. Its pill above the message box reads **run**. The changelog below is Shell Yeah's.
 
 A plugin for Paseo 0.11 and later. Type `/sh` and a command in the message box to run it yourself, in the agent's folder, with live output in the chat. The agent sees the output only if you send it.
 
@@ -25,7 +27,7 @@ The output box holds the last 300 lines and stays on the newest one while the co
 
 <img src="images/9-rerun.png" alt="A card after Rerun showing Run 2 of 2, with an arrow back to the run that failed" width="600">
 
-The command runs on the Paseo host as the user Paseo runs as, in the agent's working folder, with your shell (`$SHELL -c`). It skips interactive startup files like `.zshrc`, so aliases aren't loaded. Your PATH carries over. On Windows, the command runs in PowerShell 7 if it's installed, otherwise in the Windows PowerShell that comes with Windows. It skips your PowerShell profile for the same reason.
+The command runs on the Paseo host as the user Paseo runs as, in the agent's working folder, with your shell (`$SHELL -c`). It skips interactive startup files like `.zshrc`, so aliases aren't loaded. Your PATH carries over.
 
 Each command gets a terminal of its own, so it behaves as it does in yours. When it asks for a 2FA code, a password or a yes or no, click anywhere in the output box and type, as you would in a terminal. The box's border lights up while your keys go to the command. On a computer, after you press **Run** or **Rerun** in a card, they go there without a click. Each key goes to the command as you press it, so a one-key menu takes one key and arrow-key menus work. What you type shows only if the command shows it, so a password stays hidden. **Esc** stops typing, and so does switching to another window. Click the output to type again. On a phone, tap the output. When a command prints a sign-in link, like npm's browser sign-in, click the link in the card. **Stop** works like Ctrl+C. Pagers are off, so `git log` prints everything instead of waiting for you to press q. When the command ends, the plugin closes its terminal. Like closing a terminal window, that also ends any background job the command started, unless you started it with `nohup`.
 
@@ -39,7 +41,7 @@ Nothing reaches the agent until you press **Send**. The chat then shows one line
 
 Output of up to 200 lines goes whole. Longer output goes as a summary: the first 10 lines, the last 60, and the lines that look like errors, with their line numbers. The plugin saves the full log to a file and gives the agent its path, so the agent can read or search the rest itself. The chat line then says ``summary attached, full 12,408-line log saved for the agent``.
 
-Saved logs go in `~/.local/state/shell-yeah/logs` (`%LOCALAPPDATA%\shell-yeah\logs` on Windows), one folder per chat, never in your project. They clean up on their own. Archiving a chat deletes its logs, and archiving a workspace archives its chats. Any log older than a week is deleted, and past 100 MB the oldest logs go first.
+Saved logs go in `~/.local/state/shell-yeah/logs`, one folder per chat, never in your project. They clean up on their own. Archiving a chat deletes its logs, and archiving a workspace archives its chats. Any log older than a week is deleted, and past 100 MB the oldest logs go first.
 
 The footer says where things stand: **Claude can't see this** before you send, and **Sent to Claude 10:42** after.
 
@@ -64,25 +66,25 @@ After **Run**, the card shows the output like any other run, and **Send to Claud
 
 <img src="images/5-ran.png" alt="The deploy card after pressing Run: the command finished and Send to Claude is ready" width="600">
 
-The card also warns you, in amber, when the command is hard to undo: when it runs as administrator (`sudo`), deletes files, throws away uncommitted changes, force-pushes, or runs a script downloaded from the internet. The plugin spots these by itself, in bash and in PowerShell, so the warning shows even when the agent didn't mention it. It catches the common forms, not every disguise, so still read the command.
+The card also warns you, in amber, when the command is hard to undo: when it runs as administrator (`sudo`), deletes files, throws away uncommitted changes, force-pushes, or runs a script downloaded from the internet. The plugin spots these by itself, so the warning shows even when the agent didn't mention it. It catches the common forms, not every disguise, so still read the command.
 
 <img src="images/4-warning.png" alt="A suggested rm -rf card warning that it deletes files" width="600">
 
 Agents that started before the plugin was installed don't know the rule. Type `/sh` on its own and the plugin looks through the last reply for any shell code block and offers each one, up to four.
 
-## The Run pill
+## The run pill
 
-Agents still write a command into a sentence now and then: "sign in with `npm login`, then publish with `npm publish`". The **Run** pill above the message box handles those. It opens a small window that lists the commands in the agent's last reply, up to eight, from Run cards, shell code blocks and sentences. Press one to run it as a card in the chat. The pencil puts it in the box first so you can change it. Or paste any command into the box and press Enter. Shift+Enter adds a line.
+Agents still write a command into a sentence now and then: "sign in with `npm login`, then publish with `npm publish`". The **run** pill above the message box handles those. It opens a small window that lists the commands in the agent's last reply, up to eight, from Run cards, shell code blocks and sentences. Press one to run it as a card in the chat. The pencil puts it in the box first so you can change it. Or paste any command into the box and press Enter. Shift+Enter adds a line.
 
 <img src="images/8-run-window.png" alt="The Run pill's window lists the commands from the agent's reply, including ones written in a sentence, and takes any command you paste" width="380">
 
-Code in a sentence, or in a block with no language, counts when it starts with a program on your PATH, a shell builtin like `cd` or a script in the agent's folder. On Windows, a PowerShell command like `Get-ChildItem` counts too. Code in a sentence also needs a second word, so a passing mention of `git` doesn't show up, and neither does a file name like `package.json`. The window shows the same amber warnings as the cards.
+Code in a sentence, or in a block with no language, counts when it starts with a program on your PATH, a shell builtin like `cd` or a script in the agent's folder. Code in a sentence also needs a second word, so a passing mention of `git` doesn't show up, and neither does a file name like `package.json`. The window shows the same amber warnings as the cards.
 
 ## Agents
 
 `/sh`, **Copy** and **Rerun** work in any chat, because the plugin runs the command, not the agent. So far I've tested **Send** only with Claude.
 
-Run cards need the agent to know the `sh run` rule. Paseo passes it to new Claude, Codex, OpenCode, Pi and Oh My Pi chats. On Windows, the rule also tells the agent to write PowerShell. Agents Paseo runs over ACP, such as Copilot and Cursor, don't get it; type `/sh` on its own to turn the shell blocks in their last reply into Run cards, or open the **Run** pill. The pill works with every agent.
+Run cards need the agent to know the `sh run` rule. Paseo passes it to new Claude and Codex chats. Chats from before the plugin don't get it; type `/sh` on its own to turn the shell blocks in their last reply into Run cards, or open the **run** pill. The pill works with every agent.
 
 ## Limits
 
@@ -95,8 +97,10 @@ Run cards need the agent to know the `sh run` rule. Paseo passes it to new Claud
 ## Install
 
 ```sh
-paseo plugin add npm:@stevecastaneda/paseo-shell-yeah
+paseo plugin add git:ragokan/paseo-plugins:run-it
 ```
+
+Remove Shell Yeah first (`paseo plugin remove shell-yeah`). With both installed, both read the same replies and each adds its own pill.
 
 Enable plugins under **Settings → Plugins** on the Paseo host. You need Node.js 22.18 or later on the daemon host.
 

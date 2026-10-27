@@ -93,7 +93,7 @@ test("every chat gets one Run pill that opens the Run window; updates keep it, s
   await h.flush();
   type Pill = { removed: boolean; placement: string; agentId: string; workspaceId: string; button: { label: string; behavior: { kind: string } } };
   const pills = () => (h.registrations as unknown as Pill[]).filter((entry) => !entry.removed);
-  assert.deepEqual(plain(pills().map((entry) => [entry.placement, entry.agentId, entry.workspaceId, entry.button.label, entry.button.behavior.kind])), [["composer", "a1", "w1", "Run", "popover"], ["composer", "a2", "w1", "Run", "popover"]]);
+  assert.deepEqual(plain(pills().map((entry) => [entry.placement, entry.agentId, entry.workspaceId, entry.button.label, entry.button.behavior.kind])), [["composer", "a1", "w1", "run", "popover"], ["composer", "a2", "w1", "run", "popover"]]);
   h.agents.update({ kind: "upsert", agent: { id: "a1", workspaceId: "w1", status: "running" } });
   assert.equal(h.registrations.length, 2, "an update doesn't replace the pill");
   h.agents.update({ kind: "upsert", agent: { id: "a4", workspaceId: "w2" } });

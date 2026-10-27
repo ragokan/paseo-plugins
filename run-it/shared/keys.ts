@@ -6,7 +6,7 @@ export interface KeyPress {
 }
 
 // What a terminal sends for the keys a text box doesn't type: xterm's sequences, which
-// macOS, Linux and Windows terminals all read.
+// macOS and Linux terminals all read.
 const SPECIAL: Record<string, string> = {
   Enter: "\r",
   Backspace: "\x7f",

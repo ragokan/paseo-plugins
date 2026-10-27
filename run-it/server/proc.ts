@@ -6,7 +6,6 @@ import { StringDecoder } from "node:string_decoder";
 
 export const COLUMNS = 100;
 export const ROWS = 40;
-const WINDOWS = process.platform === "win32";
 
 // One running command. The registry sees only this, whether it runs in a terminal or on pipes.
 export interface Proc {
@@ -52,8 +51,6 @@ interface Pty {
   onData(listener: (data: string) => void): unknown;
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): unknown;
   write(data: string): void;
-  // On Windows: ends every process attached to the terminal. Takes no signal there.
-  kill(): void;
 }
 
 // node-pty has compiled parts, so Paseo can't bundle it into the plugin, and Paseo 0.11 loads a
@@ -83,9 +80,7 @@ export function pickSpawner(env: NodeJS.ProcessEnv, mode: "auto" | "off", timeou
     const timer = setTimeout(() => pick(false), timeoutMs);
     try {
       spawner.start(
-        WINDOWS
-          ? { file: env.ComSpec ?? "cmd.exe", args: ["/d", "/c", "exit 0"], cwd: env.SystemRoot ?? "C:\\", env, flushMs: 0 }
-          : { file: "/bin/sh", args: ["-c", "exit 0"], cwd: "/", env, flushMs: 0 },
+        { file: "/bin/sh", args: ["-c", "exit 0"], cwd: "/", env, flushMs: 0 },
         { data: () => undefined, exit: (code) => pick(code === 0), error: () => pick(false) },
       );
     } catch {
@@ -101,37 +96,31 @@ function ptySpawner(pty: PtyModule): Spawner {
       const term = pty.spawn(file, args, { name: "xterm-256color", cols: COLUMNS, rows: ROWS, cwd, env });
       // On macOS and Linux node-pty starts the shell as a session leader, so its pid is also its process group.
       const group = term.pid;
-      const held = WINDOWS ? null : holdOpen(term);
+      const held = holdOpen(term);
       term.onData(on.data);
       term.onExit(({ exitCode, signal }) => {
         release(held);
-        // Close the terminal as a window would. On macOS and Linux, jobs the command left
-        // behind get a hangup. On Windows, node-pty keeps the console open until it's killed,
-        // and that also ends whatever is still attached to it.
-        if (WINDOWS) setImmediate(() => closeQuietly(term));
-        else signalGroup(group, "SIGHUP");
+        // Close the terminal as a window would: jobs the command left behind get a hangup.
+        signalGroup(group, "SIGHUP");
         on.exit(signal ? null : exitCode, signal ? signalName(signal) : null);
       });
       return {
         terminal: true,
         write: (text) => term.write(text),
         interrupt: () => term.write("\x03"),
-        kill: (signal) => (WINDOWS ? closeQuietly(term) : signalGroup(group, signal)),
+        kill: (signal) => signalGroup(group, signal),
       };
     },
   };
 }
 
-// On macOS and Linux, `/bin/sh -c 'exec "$0" "$@" 2>&1' <shell> <args>`: one pipe for both
-// streams so their interleaving is the kernel's, and the command text is never rewritten.
+// `/bin/sh -c 'exec "$0" "$@" 2>&1' <shell> <args>`: one pipe for both streams so their
+// interleaving is the kernel's, and the command text is never rewritten.
 // detached = its own session and process group, no controlling terminal.
-// Windows has no process groups; Stop ends the process tree with taskkill instead.
 const pipeSpawner: Spawner = {
   terminal: false,
   start({ file, args, cwd, env, flushMs }, on) {
-    const child = WINDOWS
-      ? spawn(file, args, { cwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
-      : spawn("/bin/sh", ["-c", 'exec "$0" "$@" 2>&1', file, ...args], { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("/bin/sh", ["-c", 'exec "$0" "$@" 2>&1', file, ...args], { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const group = child.pid ?? null;
     const out = new StringDecoder("utf8");
     const err = new StringDecoder("utf8");
@@ -169,10 +158,10 @@ const pipeSpawner: Spawner = {
         throw new Error("This command can't take typing.");
       },
       interrupt: () => {
-        if (group !== null) signalTree(group, "SIGINT");
+        if (group !== null) signalGroup(group, "SIGINT");
       },
       kill: (signal) => {
-        if (group !== null) signalTree(group, signal);
+        if (group !== null) signalGroup(group, signal);
       },
     };
   },
@@ -200,23 +189,12 @@ function release(fd: number | null): void {
   }
 }
 
-function closeQuietly(term: Pty): void {
-  try {
-    term.kill();
-  } catch {
-    // Already closed.
-  }
-}
 
 function signalName(signal: number): NodeJS.Signals | null {
   const found = Object.entries(constants.signals).find(([, number]) => number === signal);
   return found ? (found[0] as NodeJS.Signals) : null;
 }
 
-function signalTree(pid: number, signal: NodeJS.Signals): void {
-  if (!WINDOWS) return signalGroup(pid, signal);
-  spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => undefined);
-}
 
 // Signals the whole group, even after its leader (the shell) has exited, so background jobs
 // it left behind are reached too. An empty group is ESRCH, which is fine.

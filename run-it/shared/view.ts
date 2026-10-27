@@ -65,8 +65,8 @@ const NO_SHELL_FILES_HINT = "/sh runs your shell without its startup files, so a
 const NO_KEYBOARD_HINT = "This command wants input, and /sh has no keyboard here. Run it in a terminal tab.";
 const TYPE_HINT = "This command may be waiting for you. Click the output and type your answer.";
 
-// Paseo's built-in provider labels (protocol/src/provider-manifest.ts); anything else is "the agent".
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", copilot: "Copilot", opencode: "OpenCode", pi: "Pi", omp: "Oh My Pi" };
+// The providers' labels; anything else is "the agent".
+const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex" };
 
 export function agentName(provider: string | null | undefined): string {
   return (provider && AGENT_NAMES[provider]) || "the agent";

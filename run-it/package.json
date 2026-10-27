@@ -1,15 +1,10 @@
 {
-  "name": "@stevecastaneda/paseo-shell-yeah",
+  "name": "run-it",
+  "private": true,
   "version": "1.2.3",
   "description": "Type /sh and a command to run it as you, in the agent's folder, with live output in the chat. The agent sees it only if you send it.",
   "license": "MIT",
   "author": "Steve Castaneda",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/stevecastaneda/paseo-plugins.git",
-    "directory": "shell-yeah"
-  },
-  "homepage": "https://github.com/stevecastaneda/paseo-plugins/tree/main/shell-yeah#readme",
   "keywords": [
     "paseo",
     "paseo-plugin",
@@ -34,9 +29,6 @@
     "tsconfig.json",
     "!**/*.test.ts"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test \"*/*.test.ts\" \"*.test.ts\""

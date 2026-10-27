@@ -58,7 +58,7 @@ function addRunPills(client: PluginClientContext): () => void {
       id: "run",
       workspaceId: agent.workspaceId,
       agentId: agent.id,
-      button: { title: "Run a command", label: "Run", icon: "SquareTerminal", behavior: { kind: "popover", Content: RunWindow } },
+      button: { title: "Run a command", label: "run", icon: "SquareTerminal", behavior: { kind: "popover", Content: RunWindow } },
     });
     pills.set(agent.id, { workspaceId: agent.workspaceId, pill });
   };

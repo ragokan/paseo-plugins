@@ -12,8 +12,7 @@ test("a log is saved in its chat's folder under a name from its command, readabl
   const store = createLogStore({ root: root() });
   const path = await store.save({ agentId: "agent-1", runId: "abc123", command: "npm test -- --watch\necho done", text: "one\n" });
   assert.match(path, /[\\/]agent-1[\\/]npm-test-watch-abc123\.log$/);
-  // Windows has no Unix file permissions; a log there inherits the user's own folder's access.
-  if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
   assert.equal(await store.save({ agentId: "agent-1", runId: "abc123", command: "npm test -- --watch\necho done", text: "two\n" }), path);
   assert.equal(readFileSync(path, "utf8"), "two\n");
 });

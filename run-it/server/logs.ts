@@ -14,9 +14,8 @@ export interface LogStore {
   prune(): Promise<void>;
 }
 
-// Windows keeps app state in %LOCALAPPDATA%, macOS and Linux tools in ~/.local/state.
-export function defaultLogRoot(home = homedir(), env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
-  if (platform === "win32" && env.LOCALAPPDATA) return join(env.LOCALAPPDATA, "shell-yeah", "logs");
+// Where macOS and Linux tools keep their state.
+export function defaultLogRoot(home = homedir()): string {
   return join(home, ".local", "state", "shell-yeah", "logs");
 }
 

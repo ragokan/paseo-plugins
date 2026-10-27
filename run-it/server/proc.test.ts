@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadPty, pickSpawner } from "./proc.ts";
 
-const posixTest = process.platform === "win32" ? test.skip : test;
-
-posixTest("in a terminal, a command's last lines arrive even when the plugin reads slowly", { skip: loadPty() === null, timeout: 30_000 }, async () => {
+test("in a terminal, a command's last lines arrive even when the plugin reads slowly", { skip: loadPty() === null, timeout: 30_000 }, async () => {
   const spawner = await pickSpawner(process.env, "auto");
   assert.equal(spawner.terminal, true);
   for (let attempt = 0; attempt < 3; attempt++) {
