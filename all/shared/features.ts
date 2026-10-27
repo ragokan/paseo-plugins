@@ -7,6 +7,12 @@ import { z } from "zod";
 // switched from that host's settings.
 export const FEATURES = [
   { id: "mark-all-read", scope: "app", title: "Mark all as read", hint: "A command palette action that marks every agent on every host as read" },
+  {
+    id: "command-panel",
+    scope: "app",
+    title: "Extensions - Command Panel",
+    hint: "Every plugin's sidebar row in the command palette, and Update All Plugins, which updates the plugins on every host",
+  },
   { id: "merge-thinking", scope: "app", title: "Merge thinking into tool groups", hint: "Folds thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group" },
   { id: "themes", scope: "app", title: "Monokai themes", hint: "Monokai Pro filters as Paseo app themes" },
   {
@@ -49,6 +55,12 @@ export const FEATURES = [
     serverOnly: true,
   },
   {
+    id: "run-it",
+    scope: "host",
+    title: "Run it",
+    hint: "Type /sh and a command to run it as you, in the agent's folder, with live output in the chat, and run the commands an agent hands you",
+  },
+  {
     id: "browseros-neo",
     scope: "host",
     title: "BrowserOS Neo",
@@ -82,6 +94,7 @@ export function hostFeatureSettings(linux: boolean) {
       "continue-after-error": z.boolean().default(true),
       "status-labels": z.boolean().default(true),
       "agent-titles": z.boolean().default(true),
+      "run-it": z.boolean().default(true),
       "browseros-neo": z.boolean().default(false),
     }),
   });
@@ -94,5 +107,6 @@ export const DEFAULT_HOST_FEATURES: HostFeatures = {
   "continue-after-error": true,
   "status-labels": true,
   "agent-titles": true,
+  "run-it": true,
   "browseros-neo": false,
 };

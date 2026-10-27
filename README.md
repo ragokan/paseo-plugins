@@ -6,6 +6,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 |---|---|
 | [tweaks](tweaks) | Hide the sidebar's workspaces you pick, hold new Done ones in Idle for a day, with Mark as done first in the command palette and on ⌘⇧D, show the ones waiting on a subagent as Waiting, give Idle its own icon, show host names without the server icon, put the machine before the folder, and gray the Done label. |
 | [mark-all-read](mark-all-read) | A command palette action that marks every agent on every host as read. |
+| [command-panel](command-panel) | Every plugin's sidebar row in the command palette, and Update All Plugins, which updates the plugins on every host. |
 | [merge-thinking](merge-thinking) | Fold thinking rows between tool calls into the collapsed tool call group, and thoughts in a row into one group. |
 | [mcp-toggle](mcp-toggle) | Turn Claude's and Codex's MCP servers on or off, from the sidebar before a session or from a chat's composer. |
 | [browseros-neo](browseros-neo) | The BrowserOS window on the daemon's Linux desktop, sidebar and all, live in Paseo: click, scroll and type into it from the desktop, the web or your phone. |
@@ -16,7 +17,7 @@ Plugins for [Paseo](https://paseo.sh), one per folder.
 | [zerosub](zerosub) | Several Claude and ChatGPT (Codex) subscriptions side by side: pick an account per agent, and move to another when one hits its limit. A copy of Kapybara's ZeroSub with its Paseo 0.13 fix. |
 | [agent-titles](agent-titles) | Give each Claude and Codex agent you start a short title from its first message, written by Paseo's metadata model. |
 | [themes](themes) | Monokai Pro filters as Paseo app themes. |
-| [all](all) | All of the above but ZeroSub and run-it in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |
+| [all](all) | All of the above but ZeroSub in one install, each with an on/off switch in the plugin's settings. BrowserOS Neo starts off. |
 
 Each folder's `OVERVIEW.md` explains the plugin and its limits.
 

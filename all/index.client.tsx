@@ -6,10 +6,12 @@ import { createSwitches, type Contribution } from "./client/switches";
 import { joinWorkspaceSettings } from "./client/plugins/tweaks/hosts";
 import { contributeApp as tweaks, contributeEveryCopy } from "./client/plugins/tweaks/index";
 import browserosNeo from "./client/plugins/browseros-neo/index";
+import commandPanel from "./client/plugins/command-panel/index";
 import machineStatus from "./client/plugins/machine-status/index";
 import markAllRead from "./client/plugins/mark-all-read/index";
 import mcpToggle from "./client/plugins/mcp-toggle/index";
 import mergeThinking from "./client/plugins/merge-thinking/index";
+import runIt from "./client/plugins/run-it/index";
 import themes from "./client/plugins/themes/index";
 import { DEFAULT_HOST_FEATURES, hostFeatureSettings, type AppFeatureId, type HostFeatureId } from "./shared/features";
 
@@ -17,6 +19,8 @@ declare const console: { warn(...args: unknown[]): void };
 
 const APP_CONTRIBUTIONS: Record<AppFeatureId, Contribution> = {
   "mark-all-read": markAllRead,
+  // Every copy adds its commands, below: Paseo offers a copy's commands only while its host is selected.
+  "command-panel": () => {},
   "merge-thinking": mergeThinking,
   themes,
   tweaks,
@@ -25,6 +29,7 @@ const HOST_CONTRIBUTIONS: Record<HostFeatureId, Contribution> = {
   "mcp-toggle": mcpToggle,
   "machine-status": machineStatus,
   "browseros-neo": browserosNeo,
+  "run-it": runIt,
   // Daemon only: it resumes agents on its own host and adds nothing to the app.
   "continue-after-error": () => {},
   // Daemon only: it labels its own host's workspaces, which the app shows like any label.
@@ -40,6 +45,7 @@ export default function contribute(client: PluginClientContext) {
   // Paseo offers a copy's commands only on its own host's workspaces, so every copy adds Mark as
   // done, and follows its own host's agents for Waiting.
   const stopTweaks = whileAppFeature("tweaks", () => contributeEveryCopy(client));
+  const stopCommandPanel = whileAppFeature("command-panel", () => commandPanel(client));
   const leaveApp = joinAppFeatures(client, APP_CONTRIBUTIONS);
   const hostSwitches = createSwitches(client, HOST_CONTRIBUTIONS);
 
@@ -62,6 +68,7 @@ export default function contribute(client: PluginClientContext) {
   return async () => {
     await hostSwitches.dispose();
     await leaveApp();
+    stopCommandPanel();
     stopTweaks();
     leaveWorkspaces();
   };

@@ -5,6 +5,7 @@ import browserosNeo from "./server/plugins/browseros-neo/index";
 import continueAfterError from "./server/plugins/continue-after-error/index";
 import machineStatus from "./server/plugins/machine-status/index";
 import mcpToggle from "./server/plugins/mcp-toggle/index";
+import runIt from "./server/plugins/run-it/index";
 import statusLabels from "./server/plugins/status-labels/index";
 import { registerWorkspaceSettings } from "./server/plugins/tweaks/index";
 import { hostFeatureSettings, type HostFeatures } from "./shared/features";
@@ -12,7 +13,7 @@ import { hostFeatureSettings, type HostFeatures } from "./shared/features";
 export default function contribute(server: PluginServerContext) {
   const linux = process.platform === "linux";
   const settings = server.registerSettings(hostFeatureSettings(linux));
-  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true, "status-labels": true, "agent-titles": true, "browseros-neo": false };
+  let features: HostFeatures = { "mcp-toggle": true, "machine-status": linux, "continue-after-error": true, "status-labels": true, "agent-titles": true, "run-it": true, "browseros-neo": false };
   const update = (state: Awaited<ReturnType<typeof settings.read>>) => {
     if (state.status === "ready") features = state.values;
     else console.warn("[all] Features settings are unreadable; keeping the previous switches:", state.error);
@@ -50,6 +51,8 @@ export default function contribute(server: PluginServerContext) {
       },
     }),
     agentTitles(gate(server, "agent-titles", () => features["agent-titles"])),
+    // Paseo stamps its cards with this plugin's id, and a rescan looks for its own cards by it.
+    runIt(gate(server, "run-it", () => features["run-it"]), { pluginId: "all" }),
     // Its own cleanup restores the desktop's resolution and stops its capture helper.
     browserosNeo(gate(server, "browseros-neo", () => features["browseros-neo"])),
   ];
