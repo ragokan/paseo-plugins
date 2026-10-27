@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { FamilySchema, LoginMethodSchema, LoginViewSchema, StateViewSchema } from "./model";
+import { FamilySchema, LoginMethodSchema, LoginViewSchema, StateViewSchema, UsageSchema } from "./model";
 
 export const getState = defineRpc({
   name: "zerosub.state",
@@ -127,4 +127,13 @@ export const setAgentAccount = defineRpc({
     accountId: z.string().nullable(),
   }),
   output: ReopenSummarySchema,
+});
+
+/** This host's live usage readings, by account identity, for ZeroSub on other hosts to reuse. */
+export const sharedUsage = defineRpc({
+  name: "zerosub.usage.shared",
+  input: z.object({}),
+  output: z.object({
+    readings: z.array(z.object({ family: FamilySchema, identity: z.string(), usage: UsageSchema })),
+  }),
 });

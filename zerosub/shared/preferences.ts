@@ -33,6 +33,11 @@ export const preferences = defineSettings({
     forkOtherProvider: z.boolean().default(false),
     /** Show the account pill in the composer of Claude and Codex agents. */
     showComposerPill: z.boolean().default(true),
+    /**
+     * Hosts that share usage readings, in order, by host name or server ID; this host among them.
+     * Before reading an account itself, a host takes a recent reading from the ones before it.
+     */
+    usageHosts: z.array(z.string().trim().min(1).max(100)).max(10).default([]),
   }),
 });
 

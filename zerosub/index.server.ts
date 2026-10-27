@@ -2,6 +2,8 @@ import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/
 import { ClaudeAdapter } from "./server/claude";
 import { CodexAdapter } from "./server/codex";
 import { Service, describe } from "./server/service";
+import { UsageInputSchema, type UsageSources } from "./server/usage-source";
+import { FAMILY_LABEL } from "./shared/model";
 import { preferences } from "./shared/preferences";
 import {
   cancelLogin,
@@ -14,6 +16,7 @@ import {
   setDefaultAccount,
   setAccountEnabled,
   forkAgent,
+  sharedUsage,
   startLogin,
   submitLoginCode,
 } from "./shared/rpc";
@@ -85,6 +88,19 @@ export default function contribute(server: PluginServerContext) {
   server.handle(setAgentAccount, ({ agentId, accountId }, { paseo }) => service.setAgentAccount(paseo, agentId, accountId));
   server.handle(forkAgent, ({ agentId }, { paseo }) => service.forkAgent(paseo, agentId));
   server.handle(setAccountEnabled, ({ accountId, enabled }, { paseo }) => service.setAccountEnabled(paseo, accountId, enabled));
+  server.handle(sharedUsage, async () => ({ readings: await service.sharedReadings() }));
+
+  // Every account in Paseo's usage display, from ZeroSub's own readings (Paseo 0.11 and later).
+  // Paseo's built-in sources list only the CLI login and the logins of agents open right now.
+  for (const family of ["claude", "codex"] as const) {
+    (server as PluginServerContext & UsageSources).registerUsageSource?.({
+      id: `zerosub-${family}`,
+      label: `${FAMILY_LABEL[family]} · ZeroSub`,
+      input: UsageInputSchema,
+      discover: async (scope) => (scope.kind === "global" ? service.usageAccounts(family) : []),
+      fetch: async (input) => service.usageReport(UsageInputSchema.parse(input).accountId),
+    });
+  }
 
   return async () => {
     stopSettings();

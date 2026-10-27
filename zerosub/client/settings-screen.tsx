@@ -15,6 +15,7 @@ export function PreferencesScreen({ theme, host, onOpenAccounts }: PluginSurface
   const settings = useSettings(preferences);
   const multiHost = useHosts().length > 1;
   const [prompt, setPrompt] = useState<string | null>(null);
+  const [usageHosts, setUsageHosts] = useState<string | null>(null);
   const muted = { color: theme.colors.foregroundMuted };
   if (settings.status === "loading") return <Text style={muted}>Loading…</Text>;
   if (settings.status !== "ready") {
@@ -122,6 +123,33 @@ export function PreferencesScreen({ theme, host, onOpenAccounts }: PluginSurface
           />
         </SettingsCard>
       </SettingsSection>
+      <SettingsSection title="Usage across hosts">
+        <SettingsCard>
+          <SettingsInput
+            label="Hosts that share usage readings, in order"
+            hint="Host names or server IDs separated by commas, this host included, e.g. ragdevbox, ragmini, ragair. Before asking the provider, this host takes a recent reading from the hosts before it. Hosts that can't be reached are skipped."
+            initialValue={settings.values.usageHosts.join(", ")}
+            onChangeText={setUsageHosts}
+            disabled={settings.saving}
+            error={settings.saveError}
+          />
+          <SettingsAction
+            label="Save the host order"
+            actionLabel="Save"
+            disabled={settings.saving || usageHosts === null}
+            onPress={() => {
+              if (usageHosts !== null) save({ usageHosts: hostList(usageHosts) });
+            }}
+          />
+        </SettingsCard>
+      </SettingsSection>
     </>
   );
+}
+
+function hostList(text: string): string[] {
+  return text
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
 }

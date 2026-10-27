@@ -39,9 +39,11 @@ import { turnRows } from "./limits";
 import { canSignInWithBrowser } from "./machine";
 import { equivalentMode } from "./modes";
 import { homesDir } from "./paths";
+import { Peers, type SharedReading } from "./peers";
 import { Reopener } from "./reopen";
 import { SwitchGuard } from "./switch-guard";
 import { loadReadings, mergeUsage, saveReadings, showLimit } from "./usage";
+import { usageKey, usageReport, type UsageAccount, type UsageReport } from "./usage-source";
 import { chooseAccount, isLimited, isUsable, mostAvailable } from "./routing";
 import {
   MAIN_ACCOUNT_ID,
@@ -96,6 +98,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   showComposerPill: true,
   autoRedeem: false,
   forkOtherProvider: false,
+  usageHosts: [],
 };
 
 interface LoginSession {
@@ -175,12 +178,14 @@ export class Service {
     private readonly store = new StateStore(),
     private readonly families = new FamilyResolver(),
     private readonly reopener = new Reopener(),
+    private readonly peers = new Peers(),
   ) {
     this.continuations = new CodexContinuations(store);
   }
 
   setPreferences(prefs: Preferences): void {
     this.prefs = prefs;
+    this.peers.setOrder(prefs.usageHosts);
   }
 
   /** Remember the plugin's SDK connection for background work (cleanup, failover). */
@@ -205,6 +210,7 @@ export class Service {
       await saveReadings(this.usage).catch(() => undefined);
     }
     for (const login of this.logins.values()) login.handle?.cancel();
+    await this.peers.stop();
   }
 
   // ------------------------------------------------------------------ upkeep
@@ -245,7 +251,7 @@ export class Service {
       const isDefault = defaultAccount(state, account.family)?.id === account.id;
       const every = account.disabled ? USAGE_IDLE_MS : busy ? USAGE_BUSY_MS : isDefault ? USAGE_DEFAULT_MS : USAGE_IDLE_MS;
       if (account.signedIn && now - attempted > every) {
-        void this.refreshUsage(account.id).catch((error: unknown) => log(`usage refresh for ${account.label} failed`, error));
+        void this.refreshUsage(account.id, false, false, every).catch((error: unknown) => log(`usage refresh for ${account.label} failed`, error));
       }
       if (now - (this.identityCheckedAt.get(account.id) ?? 0) > IDENTITY_MS) {
         void this.refreshIdentity(account.id).catch(() => undefined);
@@ -1279,13 +1285,17 @@ export class Service {
 
   // ------------------------------------------------------------------ usage
 
-  /** `renewLogin` lets the CLI refresh an expired sign-in first (explicit refreshes only: it's slow). */
-  refreshUsage(accountId: string, force = false, renewLogin = false): Promise<void> {
+  /**
+   * `renewLogin` lets the CLI refresh an expired sign-in first (explicit refreshes only: it's slow).
+   * `sharedWithinMs` marks a scheduled read, which a reading this recent from another host can stand in for.
+   */
+  refreshUsage(accountId: string, force = false, renewLogin = false, sharedWithinMs = 0): Promise<void> {
     const pending = this.usageInFlight.get(accountId);
     if (pending) return pending;
     const now = Date.now();
     // The provider asked us to wait; asking sooner would only be refused again.
-    if (now < (this.usageRetryAt.get(accountId) ?? 0)) return Promise.resolve();
+    const waiting = now < (this.usageRetryAt.get(accountId) ?? 0);
+    if (waiting && !sharedWithinMs) return Promise.resolve();
     const since = now - (this.usageAttemptAt.get(accountId) ?? 0);
     const task = (async () => {
       const account = findAccount(await this.store.read(), accountId);
@@ -1293,6 +1303,13 @@ export class Service {
       const spacing = this.adapters[account.family].usageSpacingMs;
       if (since < (force ? spacing : Math.max(spacing, 60_000))) return;
       this.usageAttemptAt.set(accountId, Date.now());
+      if (sharedWithinMs && account.identity) {
+        const current = this.usage.get(accountId);
+        const after = Math.max(Date.now() - sharedWithinMs, current ? Date.parse(current.fetchedAt) : 0);
+        const shared = await this.peers.reading(account.family, account.identity, after);
+        if (shared) return this.applyReading(account, shared);
+      }
+      if (waiting) return;
       const { retryAt, ...usage } = await this.adapters[account.family]
         .usage(account.home, { renewLogin })
         .catch(
@@ -1300,30 +1317,60 @@ export class Service {
         );
       if (retryAt) this.usageRetryAt.set(accountId, retryAt);
       else this.usageRetryAt.delete(accountId);
-      this.setUsage(accountId, mergeUsage(this.usage.get(accountId), usage));
-      // Only a live reading may change an account's limit state.
-      if (usage.windows.length === 0 || usage.error || usage.cached) return;
-      const now = Date.now();
-      const full = usage.windows.find((window) => window.usedPercent >= 100 && window.resetsAt);
-      if (full && !isLimited(account, now)) {
-        await this.markLimited(accountId, full.resetsAt ?? new Date(now + WINDOW_LIMIT_MS).toISOString(), "window");
-        return;
-      }
-      // A window limit clears once usage shows room again. Budget limits never appear in usage
-      // windows, and a fresh limit is trusted for a while (it may be on a window we can't see).
-      const settled = account.limitedAt ? now - Date.parse(account.limitedAt) > LIMIT_TRUST_MS : true;
-      const roomy = Math.max(...usage.windows.map((window) => window.usedPercent)) < 90;
-      if (!full && account.limitedUntil && account.limitKind === "window" && settled && roomy) {
-        await this.store.update((draft) => {
-          const target = findAccount(draft, accountId);
-          if (!target) return;
-          target.limitedUntil = null;
-          target.limitKind = null;
-        });
-      }
+      await this.applyReading(account, usage);
     })().finally(() => this.usageInFlight.delete(accountId));
     this.usageInFlight.set(accountId, task);
     return task;
+  }
+
+  /** Keeps a reading; a live one may also mark the account limited or lift its limit. */
+  private async applyReading(account: StoredAccount, usage: Usage): Promise<void> {
+    const accountId = account.id;
+    this.setUsage(accountId, mergeUsage(this.usage.get(accountId), usage));
+    // Only a live reading may change an account's limit state.
+    if (usage.windows.length === 0 || usage.error || usage.cached) return;
+    const now = Date.now();
+    const full = usage.windows.find((window) => window.usedPercent >= 100 && window.resetsAt);
+    if (full && !isLimited(account, now)) {
+      await this.markLimited(accountId, full.resetsAt ?? new Date(now + WINDOW_LIMIT_MS).toISOString(), "window");
+      return;
+    }
+    // A window limit clears once usage shows room again. Budget limits never appear in usage
+    // windows, and a fresh limit is trusted for a while (it may be on a window we can't see).
+    const settled = account.limitedAt ? now - Date.parse(account.limitedAt) > LIMIT_TRUST_MS : true;
+    const roomy = Math.max(...usage.windows.map((window) => window.usedPercent)) < 90;
+    if (!full && account.limitedUntil && account.limitKind === "window" && settled && roomy) {
+      await this.store.update((draft) => {
+        const target = findAccount(draft, accountId);
+        if (!target) return;
+        target.limitedUntil = null;
+        target.limitKind = null;
+      });
+    }
+  }
+
+  /** This host's live readings, for other hosts to reuse instead of asking the provider. */
+  async sharedReadings(): Promise<SharedReading[]> {
+    const state = await this.store.read();
+    return state.accounts.flatMap((account) => {
+      const usage = this.usage.get(account.id);
+      if (!account.identity || !usage || usage.windows.length === 0 || usage.cached) return [];
+      // The windows are as live as their read time says, even if a later read failed.
+      return [{ family: account.family, identity: account.identity, usage: { ...usage, error: null } }];
+    });
+  }
+
+  /** Every account of a family for Paseo's usage display, whether or not an agent uses it now. */
+  async usageAccounts(family: Family): Promise<UsageAccount[]> {
+    const state = await this.store.read();
+    return accountsOf(state, family).map((account) => ({ key: usageKey(account), label: account.label, input: { accountId: account.id } }));
+  }
+
+  /** The account's last reading. Never asks the provider: the polling above keeps it current. */
+  async usageReport(accountId: string): Promise<UsageReport> {
+    const account = findAccount(await this.store.read(), accountId);
+    if (!account) return { status: "error", error: "ZeroSub no longer has this account." };
+    return usageReport(account, this.usage.get(accountId) ?? null);
   }
 
   /** Records a reading and saves the readings shortly after, so a restart shows them straight away. */

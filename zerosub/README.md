@@ -2,13 +2,14 @@
 
 Use several Claude and ChatGPT (Codex) subscriptions side by side in [Paseo](https://paseo.sh), without logging in and out of the CLI.
 
-This is a copy of [kapybara-org/zerosub](https://github.com/kapybara-org/zerosub) 1.3.0 by Kapybara, under the same plugin id and MIT license. It adds upstream's open fix for Paseo 0.13 ([#17](https://github.com/kapybara-org/zerosub/pull/17)), and lets the account button move an agent whose session is still on an account that hit its limit.
+This is a copy of [kapybara-org/zerosub](https://github.com/kapybara-org/zerosub) 1.3.0 by Kapybara, under the same plugin id and MIT license. It adds upstream's open fix for Paseo 0.13 ([#17](https://github.com/kapybara-org/zerosub/pull/17)), lets the account button move an agent whose session is still on an account that hit its limit, lists every account in Paseo's usage display, and lets hosts share usage readings.
 
 - **Add accounts in the app.** Click **Add account** under Claude or ChatGPT and sign in on any device, including your phone. You don't need a terminal, environment variables or config files.
 - **Your existing CLI logins show up automatically.** Nothing changes until you add a second account.
 - **Pick an account per agent.** An account button in the message box shows which account each Claude or Codex agent uses. Tap it to switch.
 - **Automatic failover.** When an account hits its 5-hour or weekly limit, the agent moves to the account with the most room left and carries on. New agents skip exhausted accounts.
 - **Live usage.** Each account shows its own 5-hour and weekly usage and when they reset. Accounts in use refresh about every minute and after each turn, and a limit shows up the moment it hits.
+- **Every account in Paseo's usage display.** On Paseo 0.11 and later, each account appears under **Claude · ZeroSub** or **ChatGPT · ZeroSub**, whether or not an agent uses it, so you can pin the ones you want. These cards show ZeroSub's last reading and never ask the provider themselves. Paseo's own Claude and Codex cards stay as well; they list only the CLI login and accounts with an agent open.
 - **Banked resets.** If a provider has banked limit resets on an account, you can use one from the account card or the agent's account button.
 - **Set an account aside.** Disable an account for a while and its agents move to your other accounts, then come back when you enable it again.
 - **Several hosts.** Each Paseo host keeps its own accounts, and the Accounts screen says which host you're looking at.
@@ -92,6 +93,7 @@ Paseo installs plugins per host (daemon), so install ZeroSub on each host whose 
 - **Sign the same account in on each host.** ZeroSub never copies sign-ins between hosts. Both providers rotate sign-in tokens, so two machines sharing one token sign each other out. Separate sign-ins of the same account work fine. Limits are per account, so every host sees the combined usage and switches when it runs out.
 - **Remote hosts:** phones, and hosts without a desktop, get the code sign-in automatically. For a remote computer that does have a desktop, choose **Use a code instead** unless you're sitting at it.
 - **Banked resets refill the account everywhere.** Automatic use re-checks the limit with the provider first, so two hosts can't spend two resets on the same limit.
+- **Share usage readings.** Under Settings → Plugins → ZeroSub → **Usage across hosts**, list the hosts in order, this one included, e.g. `ragdevbox, ragmini, ragair`, and use the same list on each. Before a scheduled read, a host asks the hosts before it for a recent reading of the same account, matched by organization and email, and asks the provider only when none has one. So the first host reads, and the others mostly reuse its readings instead of each hitting the provider's rate limit. Offline or unreachable hosts are skipped silently. Refreshing by hand, and reads after a turn, still go to the provider. Hosts reach each other through Paseo's connected hosts (`paseo host ls`), so a host must be registered there to be asked.
 
 ## How it works
 
@@ -124,7 +126,7 @@ ZeroSub never implements OAuth itself and never copies credentials between accou
 
 - **MCP servers that use OAuth** (Linear, Notion, …) store their tokens per Claude account, so sign in to them once on each account.
 - **Shared settings apply to every account.** If `~/.claude/settings.json` sets an `apiKeyHelper` or API-key `env`, every account uses that key instead of its subscription.
-- **Usage for an idle Claude account** shows the last reading until the account is used again or you refresh usage. Anthropic rate-limits its usage endpoint (Claude Code and Paseo read it too), so a reading can be a few minutes old; the card then says when it was taken. Readings are saved in `$PASEO_HOME/zerosub/usage.json`, so they survive restarts.
+- **Usage for an idle Claude account** shows the last reading until the account is used again or you refresh usage. Anthropic rate-limits its usage endpoint (Claude Code and Paseo read it too), so a reading can be a few minutes old; the card then says when it was taken. Readings are saved in `$PASEO_HOME/zerosub/usage.json`, so they survive restarts. Several hosts can share one read (see [Several hosts](#several-hosts)).
 - **Password-protected daemons:** `paseo agent reload` can't authenticate. Agents then switch the next time their session starts, not immediately, and their timeline note says so.
 - **Imported Codex threads** (`paseo agent import`) are assigned to your CLI login, since that's where standalone Codex sessions come from.
 - **ChatGPT device-code sign-in** has to be enabled in ChatGPT → Settings → Security. The browser option works from a browser on the host's own computer.
