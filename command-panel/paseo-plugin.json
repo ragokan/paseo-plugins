@@ -1,0 +1,8 @@
+{
+  "id": "command-panel",
+  "name": "Extensions - Command Panel",
+  "description": "Every plugin's sidebar row in the command palette, and Update All Plugins for every host",
+  "requirements": {
+    "paseo": ">=0.13.0"
+  }
+}
