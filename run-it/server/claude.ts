@@ -176,15 +176,16 @@ export function proposalRow(input: { agentId: string; cwd: string; turnKey: stri
 }
 
 // Commands that already have a run row (any phase) after the latest reply, so a
-// repeated turn_ended, a rescan, or a plugin reload never shows a card twice.
-export function commandsAlreadyShown(timeline: Timeline): Set<string> {
+// repeated turn_ended, a rescan, or a plugin reload never shows a card twice. Paseo stamps the
+// rows with the id the plugin is installed as, which is the all plugin's when it comes bundled.
+export function commandsAlreadyShown(timeline: Timeline, pluginId = PLUGIN_ID): Set<string> {
   let lastReply = -1;
   timeline.forEach((item, index) => {
     if (item.type === "assistant_message") lastReply = index;
   });
   const shown = new Set<string>();
   for (const item of timeline.slice(lastReply + 1)) {
-    if (item.type !== "plugin" || item.pluginId !== PLUGIN_ID || item.kind !== RUN_KIND) continue;
+    if (item.type !== "plugin" || item.pluginId !== pluginId || item.kind !== RUN_KIND) continue;
     const parsed = runRow.safeParse(item.data);
     if (parsed.success) shown.add(parsed.data.command);
   }
@@ -231,10 +232,11 @@ export async function proposeFromReply(input: {
   cwd: string;
   turn: Turn;
   mode: ScanMode;
+  pluginId?: string;
 }): Promise<{ found: number; proposed: number }> {
   const text = latestAssistantText(input.turn.timeline);
   const commands = scanProposals(text, input.mode);
-  const shown = commandsAlreadyShown(input.turn.timeline);
+  const shown = commandsAlreadyShown(input.turn.timeline, input.pluginId);
   const turnKey = input.turn.id ?? sha1(text);
   let proposed = 0;
   for (const [index, command] of commands.entries()) {

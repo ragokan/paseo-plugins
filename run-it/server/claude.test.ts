@@ -148,6 +148,19 @@ test("a rescan proposes only commands that have no run row after the latest repl
   assert.deepEqual([...commandsAlreadyShown(earlier)], []);
 });
 
+test("bundled in the all plugin, its cards carry all's id, and a rescan still finds them", async () => {
+  const proposed: RunRow[] = [];
+  const registry = { propose: async (_agentId: string, r: RunRow) => { proposed.push(r); } };
+  const reply = { type: "assistant_message", text: [fence("sh run", "gh auth login"), fence("sh run", "npm publish")].join("\n") };
+  const bundledCard = { type: "plugin", pluginId: "all", id: "p-x", kind: "run", version: 1, data: row({ runId: "p-x", command: "gh auth login", phase: { kind: "dismissed" }, origin: "claude" }) };
+  const standaloneCard = { type: "plugin", pluginId: PLUGIN_ID, id: "p-y", kind: "run", version: 1, data: row({ runId: "p-y", command: "npm publish", origin: "claude" }) };
+  const timeline = [{ type: "user_message", text: "go" }, reply, bundledCard, standaloneCard] as unknown as Timeline;
+  assert.deepEqual([...commandsAlreadyShown(timeline, "all")], ["gh auth login"]);
+  const result = await proposeFromReply({ registry, agentId: "a", cwd: "/w", turn: { id: "turn-1", timeline }, mode: "marked", pluginId: "all" });
+  assert.deepEqual(result, { found: 2, proposed: 1 });
+  assert.equal(proposed[0].command, "npm publish");
+});
+
 test("a turn is its own rows and the cards after them, up to the next turn", () => {
   const card = { type: "plugin", pluginId: PLUGIN_ID, id: "p-x", kind: "run", version: 1, data: row({ command: "fly deploy" }) };
   const entries = [

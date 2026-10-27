@@ -4,9 +4,10 @@ import { createLogStore, defaultLogRoot } from "./server/logs.ts";
 import { createRunRegistry } from "./server/runs.ts";
 import { commandFinder } from "./server/shells.ts";
 import { attachSearch, dismiss, fullOutput, input, scan, send, start, stop, suggest, tail } from "./shared/rpc.ts";
-import { RUN_KIND, RUN_VERSION, cardIdOf } from "./shared/row.ts";
+import { PLUGIN_ID, RUN_KIND, RUN_VERSION, cardIdOf } from "./shared/row.ts";
 
-export default function contribute(server: PluginServerContext) {
+// `pluginId`: the id Paseo stamps on this plugin's timeline rows, the all plugin's when it comes bundled.
+export default function contribute(server: PluginServerContext, { pluginId = PLUGIN_ID }: { pluginId?: string } = {}) {
   // `paseo` exists only inside handler and hook contexts; every one of them hands over the
   // same object, so the first call remembers it for the process events that fire later.
   let paseo: PluginHandlerContext["paseo"] | null = null;
@@ -46,7 +47,7 @@ export default function contribute(server: PluginServerContext) {
   // `/sh` with no command: look at Claude's latest reply again, this time counting plain shell blocks.
   server.handle(scan, async ({ agentId }, ctx) => {
     const { cwd, turn } = await latestTurn(agentId, ctx);
-    const { found, proposed } = await proposeFromReply({ registry: runs, agentId, cwd, turn, mode: "any" });
+    const { found, proposed } = await proposeFromReply({ registry: runs, agentId, cwd, turn, mode: "any", pluginId });
     if (found === 0) throw new Error("The last reply has no commands to run. Type /sh and a command to run one.");
     if (proposed === 0) throw new Error("Those commands are already in the chat.");
     return { found: proposed };
@@ -71,7 +72,7 @@ export default function contribute(server: PluginServerContext) {
     const ref = ctx.paseo.agents.ref(event.agent.id);
     const turn = await fetchTurn((options) => ref.timeline.refetch(options), event.turnId).catch(() => null);
     if (!turn) return;
-    await proposeFromReply({ registry: runs, agentId: event.agent.id, cwd: event.agent.cwd, turn, mode: "marked" });
+    await proposeFromReply({ registry: runs, agentId: event.agent.id, cwd: event.agent.cwd, turn, mode: "marked", pluginId });
   });
 
   // An archived chat is done with: its saved logs go with it. Archiving a workspace archives its chats.
