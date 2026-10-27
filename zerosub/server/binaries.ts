@@ -41,7 +41,6 @@ let browserShim: Promise<string | null> | null = null;
  * so the sign-in link can be opened on whatever device the user is holding.
  */
 export function browserCaptureScript(): Promise<string | null> {
-  if (process.platform === "win32") return Promise.resolve(null);
   browserShim ??= (async () => {
     const directory = join(dataDir(), "bin");
     const path = join(directory, "capture-url");

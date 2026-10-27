@@ -128,7 +128,7 @@ ZeroSub never implements OAuth itself and never copies credentials between accou
 - **Password-protected daemons:** `paseo agent reload` can't authenticate. Agents then switch the next time their session starts, not immediately, and their timeline note says so.
 - **Imported Codex threads** (`paseo agent import`) are assigned to your CLI login, since that's where standalone Codex sessions come from.
 - **ChatGPT device-code sign-in** has to be enabled in ChatGPT → Settings → Security. The browser option works from a browser on the host's own computer.
-- Tested on macOS with Claude Code 2.1.280, Codex 0.156.1 and Paseo 0.9.1. Linux should work. Windows is untested.
+- Runs on macOS and Linux. Upstream tested it on macOS with Claude Code 2.1.280, Codex 0.156.1 and Paseo 0.9.1.
 
 ## Development
 

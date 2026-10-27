@@ -49,7 +49,7 @@ async function syncOverlay(home: string, spec: OverlaySpec): Promise<void> {
     const targetStat = await stat(target).catch(() => null);
     if (!targetStat) continue;
     try {
-      await symlink(target, link, process.platform === "win32" && targetStat.isDirectory() ? "junction" : undefined);
+      await symlink(target, link);
     } catch (error) {
       console.warn(`[ZeroSub] could not share ${name} with ${home}`, error instanceof Error ? error.message : error);
     }

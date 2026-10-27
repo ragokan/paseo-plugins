@@ -24,7 +24,7 @@ describe("run", () => {
     expect(result.code).toBeNull();
   });
 
-  it.skipIf(process.platform === "win32")("escalates to SIGKILL when the child ignores SIGTERM", async () => {
+  it("escalates to SIGKILL when the child ignores SIGTERM", async () => {
     const started = Date.now();
     const result = await run(NODE, ["-e", 'process.on("SIGTERM", () => {}); setTimeout(() => {}, 30_000)'], {
       timeoutMs: 200,
@@ -48,7 +48,7 @@ describe("run", () => {
     expect(Buffer.byteLength(result.stdout, "utf8")).toBeGreaterThan(MIB - 8);
   });
 
-  it.skipIf(process.platform === "win32")("reports the output limit, not a timeout, when a spewing child ignores SIGTERM", async () => {
+  it("reports the output limit, not a timeout, when a spewing child ignores SIGTERM", async () => {
     const result = await run(
       NODE,
       [

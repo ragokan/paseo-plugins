@@ -11,7 +11,7 @@ export function canSignInWithBrowser(
   exists: (path: string) => boolean = existsSync,
 ): boolean {
   if (env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY) return false;
-  if (platform === "darwin" || platform === "win32") return true;
+  if (platform === "darwin") return true;
   if (exists("/.dockerenv") || exists("/run/.containerenv")) return false;
   return Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
 }

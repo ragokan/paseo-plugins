@@ -4,9 +4,8 @@ import { canSignInWithBrowser } from "./machine";
 const nothing = () => false;
 
 describe("canSignInWithBrowser", () => {
-  it("trusts desktop operating systems", () => {
+  it("trusts macOS", () => {
     expect(canSignInWithBrowser({}, "darwin", nothing)).toBe(true);
-    expect(canSignInWithBrowser({}, "win32", nothing)).toBe(true);
   });
 
   it("uses a code for daemons started over SSH", () => {
