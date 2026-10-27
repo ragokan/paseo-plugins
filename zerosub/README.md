@@ -2,6 +2,8 @@
 
 Use several Claude and ChatGPT (Codex) subscriptions side by side in [Paseo](https://paseo.sh), without logging in and out of the CLI.
 
+This is a copy of [kapybara-org/zerosub](https://github.com/kapybara-org/zerosub) 1.3.0 by Kapybara, under the same plugin id and MIT license. It adds upstream's open fix for Paseo 0.13 ([#17](https://github.com/kapybara-org/zerosub/pull/17)), and lets the account button move an agent whose session is still on an account that hit its limit.
+
 - **Add accounts in the app.** Click **Add account** under Claude or ChatGPT and sign in on any device, including your phone. You don't need a terminal, environment variables or config files.
 - **Your existing CLI logins show up automatically.** Nothing changes until you add a second account.
 - **Pick an account per agent.** An account button in the message box shows which account each Claude or Codex agent uses. Tap it to switch.
@@ -20,13 +22,13 @@ Requirements:
 - Paseo 0.9.1 or later, with plugins enabled (**Settings → Plugins → Enable plugins**).
 - The `claude` and/or `codex` CLI installed where the daemon runs, the same ones Paseo already uses.
 
-In the app, open **Settings → Plugins**, paste `npm:@kapybara/zerosub` as the plugin source, and install. Or, on the daemon host:
+On the daemon host:
 
 ```bash
-paseo plugin install npm:@kapybara/zerosub
-# or straight from GitHub:
-paseo plugin install github:kapybara-org/zerosub
+paseo plugin install git:ragokan/paseo-plugins:zerosub
 ```
+
+To replace an installed upstream copy, remove it first with `paseo plugin remove zerosub`. Accounts live in `~/.paseo/zerosub`, which removing the plugin leaves in place.
 
 Then open **Accounts (ZeroSub)** in the sidebar.
 
@@ -131,8 +133,8 @@ ZeroSub never implements OAuth itself and never copies credentials between accou
 ## Development
 
 ```bash
-git clone https://github.com/kapybara-org/zerosub.git
-cd zerosub
+git clone https://github.com/ragokan/paseo-plugins.git
+cd paseo-plugins/zerosub
 npm install
 paseo plugin install "$(pwd)"   # run the working copy
 
@@ -149,7 +151,7 @@ Code layout:
 - `server/`: routing, account homes, Claude and Codex adapters, failover.
 - `shared/`: RPC contracts and the view model.
 
-Report problems at [github.com/kapybara-org/ZeroSub/issues](https://github.com/kapybara-org/ZeroSub/issues).
+Report problems at [github.com/ragokan/paseo-plugins/issues](https://github.com/ragokan/paseo-plugins/issues).
 
 ## Uninstall
 

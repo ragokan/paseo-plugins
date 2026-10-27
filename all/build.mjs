@@ -10,6 +10,9 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.dirname(root);
 const RUNTIMES = ["client", "server", "shared"];
 const CODE = /\.[cm]?[jt]sx?$/;
+// Installed on their own instead. ZeroSub keeps one account registry per daemon, and a second copy
+// would route every session as well.
+const STANDALONE = new Set(["zerosub"]);
 // Relative specifiers in `from "…"`, `import "…"` and `import("…")`.
 const RELATIVE_IMPORT = /(\bfrom\s*|\bimport\s*\(?\s*)(["'])(\.{1,2}\/[^"']*)\2/g;
 
@@ -47,7 +50,7 @@ for (const runtime of RUNTIMES) rmSync(path.join(root, runtime, "plugins"), { re
 const copied = [];
 for (const entry of readdirSync(repository, { withFileTypes: true })) {
   const directory = path.join(repository, entry.name);
-  if (!entry.isDirectory() || directory === root || !existsSync(path.join(directory, "paseo-plugin.json"))) continue;
+  if (!entry.isDirectory() || directory === root || STANDALONE.has(entry.name) || !existsSync(path.join(directory, "paseo-plugin.json"))) continue;
   for (const file of pluginFiles(directory)) {
     const target = destination(entry.name, file);
     if (!target) continue;

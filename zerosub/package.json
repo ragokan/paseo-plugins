@@ -1,5 +1,6 @@
 {
-  "name": "@kapybara/zerosub",
+  "name": "zerosub",
+  "private": true,
   "version": "1.3.0",
   "description": "ZeroSub: use several Claude and ChatGPT (Codex) subscriptions side by side in Paseo. Add accounts in-app, pick one per agent, and switch automatically when an account hits its limit.",
   "keywords": [
@@ -13,18 +14,11 @@
     "accounts",
     "usage-limits"
   ],
-  "homepage": "https://github.com/kapybara-org/zerosub#readme",
-  "bugs": {
-    "url": "https://github.com/kapybara-org/zerosub/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kapybara-org/zerosub.git"
-  },
   "license": "MIT",
   "author": "Kapybara",
   "files": [
     "paseo-plugin.json",
+    "OVERVIEW.md",
     "index.client.tsx",
     "index.server.ts",
     "client/",
@@ -52,8 +46,5 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.7",
     "zod": "^4.4.3"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

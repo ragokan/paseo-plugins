@@ -1,5 +1,7 @@
 {
   "id": "zerosub",
+  "name": "ZeroSub",
+  "description": "Use several Claude and ChatGPT (Codex) subscriptions side by side, pick one per agent, and switch when an account hits its limit.",
   "requirements": {
     "paseo": ">=0.9.1"
   }
